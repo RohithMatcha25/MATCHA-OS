@@ -89,14 +89,13 @@
     /* ── Chat Area ── */
     #chat {
       flex: 1;
-      overflow-y: scroll;  /* always scrollable */
+      overflow-y: auto;
       overflow-x: hidden;
       padding: 20px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+      display: block;
       -webkit-overflow-scrolling: touch;
       scroll-behavior: smooth;
+      min-height: 0;
     }
 
     /* push messages to bottom when few */
@@ -108,9 +107,10 @@
       justify-content: flex-end;
     }
 
-    #chat::-webkit-scrollbar { width: 4px; }
-    #chat::-webkit-scrollbar-track { background: transparent; }
-    #chat::-webkit-scrollbar-thumb { background: #222; border-radius: 2px; }
+    #chat::-webkit-scrollbar { width: 6px; }
+    #chat::-webkit-scrollbar-track { background: #111; }
+    #chat::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
+    #chat::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
 
     /* ── Messages ── */
     .msg {
@@ -520,10 +520,25 @@
       if (response.startsWith('__OPEN_URL__')) {
         const urlMatch = response.match(/__OPEN_URL__(.+?)__LABEL__(.+)/);
         if (urlMatch) {
-          const url = urlMatch[1];
-          const label = urlMatch[2];
+          const url = urlMatch[1].trim();
+          const label = urlMatch[2].trim();
           window.open(url, '_blank');
           addMessage(`Opening ${label}...`, 'matcha', true);
+        }
+      } else if (response.startsWith('__BUILD__ASYNC__')) {
+        const buildRequest = response.replace('__BUILD__ASYNC__', '').trim();
+        addMessage('Building your app — writing files, installing dependencies, starting server... this takes ~15 seconds.', 'matcha', true);
+        // Fire build endpoint async
+        try {
+          const br = await fetch('/api/build', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ request: buildRequest })
+          });
+          const bd = await br.json();
+          addMessage(bd.response || 'Build failed.', 'matcha');
+        } catch {
+          addMessage('Build request failed — check connection.', 'matcha');
         }
       } else {
         addMessage(response, 'matcha');
@@ -554,7 +569,7 @@
 
     msg.appendChild(bubble);
     chatInner.insertBefore(msg, thinkingEl);
-    scrollBottom();
+    scrollBottom(true);
   }
 
   // ── Markdown renderer ──
@@ -617,9 +632,12 @@
     return html;
   }
 
-  function scrollBottom() {
+  function scrollBottom(force = false) {
     requestAnimationFrame(() => {
-      chatEl.scrollTop = chatEl.scrollHeight;
+      const distFromBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight;
+      if (force || distFromBottom < 200) {
+        chatEl.scrollTop = chatEl.scrollHeight;
+      }
     });
   }
 

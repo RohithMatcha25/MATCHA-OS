@@ -11,6 +11,7 @@ import os
 import re
 import datetime
 import sqlite3
+import threading
 from pathlib import Path
 from collections import deque
 
@@ -96,9 +97,17 @@ class MatchaAI:
         self._brain = None
         self._learner = None
         self._perms = None
+        self._builder = None
+        self._executor = None
+        self._trainer = None
+        self._evolution = None
         self._init_brain()
         self._init_learner()
         self._init_perms()
+        self._init_builder()
+        self._init_executor()
+        self._init_trainer()
+        self._init_evolution()
         print(f"[MATCHA] Core AI initialised — v{MATCHA_VERSION}")
 
     def _init_brain(self):
@@ -127,6 +136,49 @@ class MatchaAI:
         except Exception as e:
             print(f"[MATCHA] Permissions unavailable: {e}")
             self._perms = None
+
+    def _init_builder(self):
+        """Load the app builder."""
+        try:
+            from core.builder.matcha_builder import MatchaBuilder
+            self._builder = MatchaBuilder()
+        except Exception as e:
+            print(f"[MATCHA] Builder unavailable: {e}")
+            self._builder = None
+
+    def _init_executor(self):
+        """Load the code executor."""
+        try:
+            from core.executor.matcha_executor import MatchaExecutor
+            self._executor = MatchaExecutor()
+        except Exception as e:
+            print(f"[MATCHA] Executor unavailable: {e}")
+            self._executor = None
+
+    def _init_trainer(self):
+        """Load the self-training engine."""
+        try:
+            from core.trainer.matcha_trainer import MatchaTrainer
+            self._trainer = MatchaTrainer()
+        except Exception as e:
+            print(f"[MATCHA] Trainer unavailable: {e}")
+            self._trainer = None
+
+    def _init_evolution(self):
+        """Load the evolution engine."""
+        try:
+            from core.evolution.matcha_evolution import MatchaEvolution
+            self._evolution = MatchaEvolution()
+            # Kick off background learning on boot topics
+            if self.online:
+                seed_topics = [
+                    "artificial intelligence", "machine learning", "python programming",
+                    "web development", "data science", "cloud computing", "cybersecurity"
+                ]
+                self._evolution.start_background_crawl(seed_topics)
+        except Exception as e:
+            print(f"[MATCHA] Evolution unavailable: {e}")
+            self._evolution = None
 
     def _load_retriever(self):
         """Load trained MATCHA model for fallback reasoning."""
@@ -274,6 +326,24 @@ class MatchaAI:
             except Exception:
                 pass
 
+        # Log to trainer for self-improvement
+        if self._trainer:
+            try:
+                self._trainer.log(user_input, response, intent)
+            except Exception:
+                pass
+
+        # Evolution: if online, deepen knowledge on repeated topics
+        if self._evolution and self.online and intent == "general":
+            try:
+                topic = user_input[:60]
+                threading.Thread(
+                    target=self._evolution.learn_from_web,
+                    args=(topic,), daemon=True
+                ).start()
+            except Exception:
+                pass
+
         return response
 
     def _execute_permitted_action(self, result: dict) -> str:
@@ -371,6 +441,43 @@ class MatchaAI:
                         return "install_browser_app"
                 return "store_install"
 
+        # ── Build / create app ──
+        build_triggers = ["build", "create", "make", "develop", "code me", "write me a"]
+        build_targets = ["app", "website", "web app", "webapp", "tool", "dashboard",
+                         "todo", "calculator", "game", "chat app", "portfolio", "landing page",
+                         "api", "backend", "frontend", "full stack"]
+        if any(bt in t for bt in build_triggers) and any(tg in t for tg in build_targets):
+            return "build_app"
+
+        # ── Run / execute code ──
+        if any(w in t for w in ["run this", "execute this", "run the code", "execute code",
+                                  "run code", "test this code"]):
+            return "run_code"
+
+        # ── Self-train / retrain ──
+        if any(w in t for w in ["retrain", "update your model", "update your training",
+                                  "train yourself", "improve yourself", "update your knowledge",
+                                  "self train", "self-train"]):
+            return "self_retrain"
+
+        # ── Evolution / learn from web ──
+        if any(w in t for w in ["learn about", "research", "study", "find out about",
+                                  "what do you know about", "evolve", "update yourself"]):
+            return "evolve_learn"
+
+        # ── What have you learned / evolution stats ──
+        if any(w in t for w in ["what have you learned", "what do you know", "your knowledge",
+                                  "evolution stats", "learning stats", "how smart are you"]):
+            return "evolution_stats"
+
+        # ── List running apps ──
+        if any(w in t for w in ["list apps", "running apps", "what apps", "show apps", "my apps"]):
+            return "list_apps"
+
+        # ── Stop app ──
+        if any(w in t for w in ["stop app", "kill app", "close app", "shut down app"]):
+            return "stop_app"
+
         # ── Media / music ──
         if any(w in t for w in ["play music", "play songs", "play spotify", "music player",
                                   "open spotify", "play something"]):
@@ -401,6 +508,10 @@ class MatchaAI:
         # ── File management ──
         if any(w in t for w in ["find file", "search file", "where is my file", "open folder"]):
             return "file_management"
+        if any(w in t for w in ["list files", "files in", "what files", "show files",
+                                  "files list", "my downloads", "my documents", "my desktop",
+                                  "list my", "what's in my", "whats in my"]):
+            return "file_list"
 
         # ── Productivity ──
         if any(w in t for w in ["remind me", "set reminder", "set alarm", "alarm in"]):
@@ -637,6 +748,53 @@ class MatchaAI:
             result = sc.find_files(query or text)
             return result.get("summary") or result.get("error", "File search failed.")
 
+        elif intent == "file_list":
+            import os, platform
+            t_lower = text.lower()
+            home = os.path.expanduser("~")
+            # Determine which folder
+            folder_map = {
+                "downloads": os.path.join(home, "Downloads"),
+                "documents": os.path.join(home, "Documents"),
+                "desktop": os.path.join(home, "Desktop"),
+                "pictures": os.path.join(home, "Pictures"),
+                "music": os.path.join(home, "Music"),
+                "videos": os.path.join(home, "Videos"),
+            }
+            target_dir = None
+            target_name = "home"
+            for name, path in folder_map.items():
+                if name in t_lower:
+                    target_dir = path
+                    target_name = name.title()
+                    break
+            if not target_dir:
+                target_dir = home
+            try:
+                if not os.path.exists(target_dir):
+                    return f"Folder '{target_name}' not found on this system."
+                entries = os.listdir(target_dir)
+                if not entries:
+                    return f"**{target_name}** is empty."
+                # Sort: folders first, then files
+                dirs = sorted([e for e in entries if os.path.isdir(os.path.join(target_dir, e))])
+                files = sorted([e for e in entries if os.path.isfile(os.path.join(target_dir, e))])
+                lines = []
+                if dirs:
+                    lines.append("**Folders:**")
+                    lines.extend([f"📁 {d}" for d in dirs[:20]])
+                if files:
+                    lines.append("\n**Files:**")
+                    lines.extend([f"📄 {f}" for f in files[:30]])
+                total = len(entries)
+                shown = min(50, total)
+                lines.append(f"\n_{shown} of {total} items in {target_name}_")
+                return "\n".join(lines)
+            except PermissionError:
+                return f"Access denied to {target_name}."
+            except Exception as e:
+                return f"Could not read folder: {e}"
+
         # ── Devices ───────────────────────────────────────────────────────────────
         elif intent == "devices":
             dm = self._get_device_manager()
@@ -752,6 +910,64 @@ class MatchaAI:
                 if perm.get("ask"):
                     return perm["message"]
             return f"__OPEN_URL__{url}__LABEL__YouTube Music"
+
+        # ── Build App ─────────────────────────────────────────────────────────────
+        elif intent == "build_app":
+            if not self._executor:
+                return "Executor not available."
+            if not self._brain:
+                return "I need the AI brain to build apps. Connect to the internet first."
+            return "__BUILD__ASYNC__" + text
+
+        elif intent == "run_code":
+            if not self._executor:
+                return "Executor not available."
+            # Extract code block from text
+            code_match = re.search(r"```(?:python)?\n(.*?)```", text, re.DOTALL)
+            if code_match:
+                return self._executor.run_code(code_match.group(1))
+            return "Paste your code in a code block (```python ... ```) and I'll run it."
+
+        elif intent == "self_retrain":
+            if not self._trainer:
+                return "Trainer not available."
+            return self._trainer.retrain_intent_model()
+
+        elif intent == "evolve_learn":
+            if not self._evolution:
+                return "Evolution engine not available."
+            # Extract topic
+            t_lower = text.lower()
+            for phrase in ["learn about", "research", "study", "find out about",
+                           "what do you know about", "learn more about"]:
+                if phrase in t_lower:
+                    topic = t_lower.split(phrase)[-1].strip().rstrip("?.")
+                    if topic:
+                        result = self._evolution.learn_from_web(topic)
+                        return f"Learned about **{topic}**:\n\n{result[:400]}"
+            # Fallback — just use brain
+            return self._reason(text)
+
+        elif intent == "evolution_stats":
+            parts = []
+            if self._evolution:
+                parts.append(self._evolution.summary())
+            if self._trainer:
+                parts.append(self._trainer.summary())
+            return "\n\n".join(parts) if parts else "No stats yet."
+
+        elif intent == "list_apps":
+            if self._executor:
+                return self._executor.list_apps()
+            return "Executor not available."
+
+        elif intent == "stop_app":
+            if self._executor:
+                t_lower = text.lower()
+                for w in ["stop", "kill", "close", "shut down", "app"]:
+                    t_lower = t_lower.replace(w, "")
+                return self._executor.stop(t_lower.strip() or "app")
+            return "Executor not available."
 
         # ── General - Brain handles everything ───────────────────────────────────
         else:

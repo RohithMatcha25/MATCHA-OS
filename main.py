@@ -24,13 +24,23 @@ def index():
 
 @app.route("/api/boot")
 def boot():
-    """Called when MATCHA interface loads."""
+    """Called when MATCHA interface loads. Resets brain history to avoid cross-session leakage."""
+    if matcha._brain:
+        matcha._brain.reset()
     greeting = matcha.greet_on_boot()
     return jsonify({
         "greeting": greeting,
-        "version": "0.2.0",
+        "version": "0.4.0",
         "online": matcha.online
     })
+
+
+@app.route("/api/reset", methods=["POST"])
+def reset():
+    """Manually reset conversation history."""
+    if matcha._brain:
+        matcha._brain.reset()
+    return jsonify({"success": True, "message": "Conversation cleared."})
 
 
 @app.route("/api/think", methods=["POST"])
@@ -346,6 +356,23 @@ def download():
     if os.path.exists(zip_path):
         return _send_file(zip_path, as_attachment=True, download_name="matcha-os-windows.zip")
     return {"error": "File not found"}, 404
+
+
+# ─── Builder / Executor ───────────────────────────────────────────────────────
+
+@app.route("/api/build", methods=["POST"])
+def build_app():
+    """Build and run a real app from a natural-language request."""
+    data = request.get_json()
+    req = data.get("request", "")
+    if not req:
+        return jsonify({"success": False, "response": "No request provided."})
+    if not matcha._executor:
+        return jsonify({"success": False, "response": "Executor not available."})
+    if not matcha._brain:
+        return jsonify({"success": False, "response": "Brain not available — check internet connection."})
+    result = matcha._executor.build(req, matcha._brain)
+    return jsonify({"success": True, "response": result})
 
 
 # ─── Learning & Permissions ───────────────────────────────────────────────────
