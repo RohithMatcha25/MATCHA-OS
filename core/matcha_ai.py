@@ -411,7 +411,7 @@ class MatchaAI:
         if any(w in t for w in ["running apps", "running processes", "list processes",
                                   "show processes", "what's running", "active apps"]):
             return "process_list"
-        if re.search(r'\b(cpu|ram|memory usage|disk space|system info|battery|charge level|storage)\b', t):
+        if re.search(r'\b(cpu|ram|memory usage|disk space|system info|battery|charge level|storage|username|user name|whoami|my name on this|computer name|hostname|system user)\b', t):
             return "system_info"
 
         # ── Open app or website ──
@@ -442,17 +442,21 @@ class MatchaAI:
                 return "store_install"
 
         # ── Build / create app ──
-        # "can you build" = capability question, NOT a build request
-        # Only trigger builder when user actually says "build me X" / "create a X" / "make me a X"
-        build_triggers = ["build me", "create me", "make me", "develop me", "build a", "create a",
-                          "make a", "develop a", "code me a", "write me a", "i want you to build",
-                          "i want a", "can you make me", "can you build me", "make an", "build an", "create an"]
-        build_targets = ["app", "website", "web app", "webapp", "tool", "dashboard",
-                         "todo", "calculator", "game", "chat app", "portfolio", "landing page",
-                         "api", "backend", "frontend", "full stack", "quiz", "timer", "weather app",
-                         "notes app", "blog", "store", "shop", "tracker"]
-        if any(bt in t for bt in build_triggers) and any(tg in t for tg in build_targets):
-            return "build_app"
+        # ONLY trigger when user explicitly asks to BUILD something
+        # "can you build" / "can you make" = capability question → goes to brain
+        # Must have BOTH: an action phrase ("build me", "make me") AND a target ("app", "website")
+        # AND must NOT start with "can you" (capability question)
+        if not t.startswith("can you") and not t.startswith("could you") and not t.startswith("do you"):
+            build_triggers = ["build me", "create me", "make me", "develop me",
+                              "build a ", "create a ", "make a ", "develop a ",
+                              "code me a", "write me a", "i want you to build",
+                              "make an ", "build an ", "create an "]
+            build_targets = ["app", "website", "web app", "webapp", "tool", "dashboard",
+                             "todo", "calculator", "game", "chat app", "portfolio", "landing page",
+                             "api", "backend", "frontend", "full stack", "quiz", "timer",
+                             "weather app", "notes app", "blog", "store", "shop", "tracker"]
+            if any(bt in t for bt in build_triggers) and any(tg in t for tg in build_targets):
+                return "build_app"
 
         # ── Run / execute code ──
         if any(w in t for w in ["run this", "execute this", "run the code", "execute code",
@@ -513,9 +517,12 @@ class MatchaAI:
         # ── File management ──
         if any(w in t for w in ["find file", "search file", "where is my file", "open folder"]):
             return "file_management"
-        if any(w in t for w in ["list files", "files in", "what files", "show files",
-                                  "files list", "my downloads", "my documents", "my desktop",
-                                  "list my", "what's in my", "whats in my"]):
+        if any(w in t for w in ["list files", "list folders", "list the folders", "list my folders",
+                                  "files in", "what files", "show files", "files list", "folder list",
+                                  "my downloads", "my documents", "my desktop", "my pictures",
+                                  "list my", "what's in my", "whats in my", "show my folders",
+                                  "what folders", "show folders", "my folders", "folders in my",
+                                  "list the files", "show the files", "list all files", "list all folders"]):
             return "file_list"
 
         # ── Productivity ──

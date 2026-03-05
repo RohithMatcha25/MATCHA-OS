@@ -223,16 +223,24 @@ class SystemControl:
 
     def get_system_info(self) -> dict:
         try:
+            import getpass, socket, platform as pf
             cpu = psutil.cpu_percent(interval=0.5)
             ram = psutil.virtual_memory()
-            disk = psutil.disk_usage("/")
+            disk = psutil.disk_usage("/" if self.platform != "windows" else "C:\\")
+            username = getpass.getuser()
+            hostname = socket.gethostname()
+            os_info = pf.platform()
             summary = (
+                f"Username: {username}. "
+                f"Computer: {hostname}. "
+                f"OS: {pf.system()} {pf.release()}. "
                 f"CPU: {cpu}%. "
                 f"RAM: {ram.percent}% used ({round(ram.used/1e9,1)}GB / {round(ram.total/1e9,1)}GB). "
                 f"Disk: {disk.percent}% used ({round(disk.used/1e9,1)}GB / {round(disk.total/1e9,1)}GB)."
             )
             return {"success": True, "cpu_percent": cpu, "ram_percent": ram.percent,
-                    "disk_percent": disk.percent, "summary": summary}
+                    "disk_percent": disk.percent, "username": username,
+                    "hostname": hostname, "summary": summary}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
