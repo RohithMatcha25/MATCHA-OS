@@ -371,6 +371,11 @@ class MatchaAI:
                         return "install_browser_app"
                 return "store_install"
 
+        # ── Media / music ──
+        if any(w in t for w in ["play music", "play songs", "play spotify", "music player",
+                                  "open spotify", "play something"]):
+            return "media_play"
+
         # ── Weather / News / Web ──
         if any(w in t for w in ["weather", "temperature", "forecast", "raining", "sunny", "cloudy"]):
             return "weather"
@@ -727,7 +732,28 @@ class MatchaAI:
             prod = self._get_productivity()
             return prod.list_clipboard() if prod else "Clipboard history unavailable."
 
-        # ── General — Brain handles everything ───────────────────────────────────
+        # ── Media ─────────────────────────────────────────────────────────────────
+        elif intent == "media_play":
+            # Check if user wants a specific service
+            t_lower = text.lower()
+            for key, url in BROWSER_APPS.items():
+                if key in t_lower and key in ("spotify", "youtube"):
+                    label = key.title() + (" Music" if key == "youtube" else "")
+                    full_url = "https://music.youtube.com" if key == "youtube" else url
+                    if self._perms:
+                        perm = self._perms.needs_permission("open_browser", label, {"url": full_url, "label": label})
+                        if perm.get("ask"):
+                            return perm["message"]
+                    return f"__OPEN_URL__{full_url}__LABEL__{label}"
+            # Default: YouTube Music
+            url = "https://music.youtube.com"
+            if self._perms:
+                perm = self._perms.needs_permission("open_browser", "YouTube Music", {"url": url, "label": "YouTube Music"})
+                if perm.get("ask"):
+                    return perm["message"]
+            return f"__OPEN_URL__{url}__LABEL__YouTube Music"
+
+        # ── General - Brain handles everything ───────────────────────────────────
         else:
             return self._reason(text)
 
@@ -973,6 +999,8 @@ class MatchaAI:
             self._perms.revoke_always_allow(action_type)
             return f"Permission revoked. I'll ask before {action_type.replace('_', ' ')} from now on."
         return "Permission manager unavailable."
+
+    def greet_on_boot(self) -> str:
         """What MATCHA says when the OS starts."""
         hour = datetime.datetime.now().hour
         if hour < 12:
