@@ -1,126 +1,169 @@
 """
-MATCHA Brain - Groq + Llama 3.3 70B
-Sharp, direct, brutally honest. No fakery.
+MATCHA Brain - Local Ollama (zero cost, zero rate limits, runs on YOUR machine)
+Falls back to Groq only if Ollama isn't installed yet.
 """
 
-from groq import Groq
-import re
 import datetime
+import re
+import json
+import urllib.request
+import urllib.error
 from typing import Optional
 
+OLLAMA_URL = "http://localhost:11434/api/chat"
+OLLAMA_MODELS = ["llama3.2", "llama3.1", "llama3", "mistral", "phi3", "gemma2"]
+
+# Groq fallback (used only if Ollama not installed)
 GROQ_API_KEY = "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"
-# Model priority: try fastest/highest-limit first, fall back if rate limited
-MODELS = [
-    "llama-3.1-8b-instant",      # 20,000 req/day, 6,000 tokens/min — fastest
-    "llama-3.3-70b-versatile",   # 14,400 req/day — smartest
-    "gemma2-9b-it",              # separate quota
-    "mixtral-8x7b-32768",        # separate quota
-]
+GROQ_MODELS = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "gemma2-9b-it", "mixtral-8x7b-32768"]
 
 SYSTEM_PROMPT = (
-    "You are MATCHA - an AI assistant built into an operating system running on the user's computer.\n\n"
-
-    "## YOUR IDENTITY\n"
-    "- You are MATCHA. Not ChatGPT. Not GPT-4. Not a generic AI.\n"
-    "- You are direct, sharp, honest, and useful.\n"
-    "- You run locally on the user's machine. You have OS control features (open apps, check system, etc).\n"
-    "- The user's name is {user_name}.\n\n"
-
-    "## HONESTY RULES - NEVER BREAK THESE\n"
-    "- NEVER pretend to do something you cannot do.\n"
-    "- NEVER simulate fake processes, fake updates, fake self-evolution, fake downloads.\n"
-    "- NEVER claim you are updating yourself, evolving, or self-modifying. You cannot do this.\n"
-    "- NEVER ask for passwords, login credentials, or sensitive data. Ever.\n"
-    "- If you cannot do something, say so in ONE sentence. No long explanations.\n"
-    "- Do NOT invent context. Only respond to what the user actually said.\n"
-    "- Do NOT bring up topics the user never mentioned (LinkedIn, projects, etc).\n\n"
-
-    "## RESPONSE STYLE\n"
+    "You are MATCHA - an AI assistant and operating system running on the user's computer.\n\n"
+    "## Who you are\n"
+    "You are intelligent, direct, and sharp. You have real opinions. You are NOT a watered-down assistant.\n\n"
+    "## Critical rules\n"
     "- NEVER start with filler: no 'Certainly!', 'Of course!', 'Great question!', 'Sure!', 'Absolutely!'\n"
     "- Get straight to the point. First word = the answer.\n"
-    "- Short questions get short answers. Long questions get long answers.\n"
-    "- 'Can you X?' = YES or NO + one line. Don't DO it unless asked.\n"
+    "- 'Can you X?' = YES or NO + one line. Don't actually DO it unless asked.\n"
     "- Never write code unless explicitly asked to write code.\n"
+    "- Short answers for short questions. Long only when needed.\n"
     "- Never repeat the question back.\n"
-    "- Use markdown naturally. Code always in code blocks.\n\n"
-
-    "## WHAT YOU CAN ACTUALLY DO\n"
-    "- Answer questions on any topic (science, tech, history, business, etc)\n"
-    "- Write code in any language - full working code when asked\n"
-    "- Build complete apps/websites when asked with a spec\n"
+    "- Never refuse reasonable requests.\n"
+    "- NEVER pretend to self-modify, self-evolve, or update your own weights - be honest.\n"
+    "- NEVER ask for passwords or credentials.\n\n"
+    "## What you can do\n"
+    "- Write any code: Python, JS, HTML, React, Django, SQL, Bash\n"
+    "- Build complete working apps when asked\n"
     "- Debug and fix code\n"
-    "- Open apps and websites on the user's computer\n"
-    "- Check system info (CPU, RAM, disk)\n"
-    "- Weather, news, web search\n"
-    "- Notes, reminders, productivity\n\n"
-
-    "## WHAT YOU CANNOT DO - BE HONEST\n"
-    "- You cannot self-modify, self-evolve, or update your own code or weights\n"
-    "- You cannot access the internet independently (the system fetches data for you)\n"
-    "- You cannot control hardware directly (camera, microphone) unless the OS exposes it\n"
-    "- You cannot remember things between sessions (unless memory files are used)\n"
-    "- You cannot send emails, messages, or post to social media\n"
-    "- When asked about these: say 'No, I can't do that.' and move on\n\n"
-
-    "## EXAMPLE RESPONSES\n"
-    "'can you code?' -> 'Yes - Python, JavaScript, HTML, React, Django, SQL, Bash. What do you need?'\n"
-    "'can you evolve yourself?' -> 'No. I cannot modify my own code or weights. That requires a developer to retrain me.'\n"
-    "'can you build a website?' -> 'Yes. Give me the spec and I will build it.'\n"
-    "'who are you?' -> 'MATCHA - your local AI OS. I run on your machine, answer questions, open apps, and control your system.'\n"
-    "'hello' -> 'Hey. What do you need?'\n\n"
-
-    "Today is {datetime}."
+    "- Explain anything\n"
+    "- Plan, strategise, write content\n"
+    "- Control the OS (handled by the system layer)\n\n"
+    "The user's name is {user_name}. Today: {datetime}."
 )
 
 
 class MatchaBrain:
     def __init__(self, user_name: str = "Rohith"):
-        self.client = Groq(api_key=GROQ_API_KEY)
         self.user_name = user_name
         self.history = []
         self.max_history = 12
-        print("[MATCHA Brain] Groq + Llama 3.3 70B - Premium mode ready.")
+        self.mode = "none"
+        self._ollama_model = None
+        self._init()
+
+    def _init(self):
+        """Try Ollama first, fall back to Groq."""
+        model = self._find_ollama_model()
+        if model:
+            self._ollama_model = model
+            self.mode = "ollama"
+            print(f"[MATCHA Brain] Ollama ({model}) - Local mode, zero cost, no rate limits.")
+        else:
+            self.mode = "groq"
+            print("[MATCHA Brain] Ollama not found - using Groq fallback.")
+            print("[MATCHA Brain] Install Ollama for unlimited local AI: https://ollama.com")
+
+    def _find_ollama_model(self) -> Optional[str]:
+        """Check if Ollama is running and has a model available."""
+        try:
+            req = urllib.request.Request(
+                "http://localhost:11434/api/tags",
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=2) as r:
+                data = json.loads(r.read())
+                models = [m["name"].split(":")[0] for m in data.get("models", [])]
+                if not models:
+                    return None
+                # Prefer in priority order
+                for preferred in OLLAMA_MODELS:
+                    if preferred in models:
+                        return preferred
+                return models[0]  # Use whatever's installed
+        except Exception:
+            return None
 
     def think(self, user_message: str, system_context: str = "") -> str:
-        """Generate a response — cycles through models on rate limit."""
-        import time
-        now = datetime.datetime.now().strftime("%A, %d %b %Y at %H:%M")
-        system = SYSTEM_PROMPT.replace("{user_name}", self.user_name).replace("{datetime}", now)
-        if system_context:
-            system += f"\n\nSystem data: {system_context}"
-
+        """Generate a response - Ollama first, Groq fallback."""
         self.history.append({"role": "user", "content": user_message})
         if len(self.history) > self.max_history:
             self.history = self.history[-self.max_history:]
 
-        for model in MODELS:
-            try:
-                response = self.client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "system", "content": system}, *self.history],
-                    temperature=0.65,
-                    max_tokens=2048,
-                    top_p=1,
-                    stream=False,
-                )
-                answer = self._clean(response.choices[0].message.content.strip())
-                self.history.append({"role": "assistant", "content": answer})
-                return answer
-            except Exception as e:
-                err = str(e).lower()
-                if "rate_limit" in err or "429" in err:
-                    time.sleep(1)
-                    continue  # try next model
-                elif "auth" in err or "api_key" in err:
-                    return "Groq API key issue."
-                return f"Error: {e}"
+        system = self._build_system(system_context)
 
-        return "All AI models are busy right now. Try again in 30 seconds."
+        if self.mode == "ollama":
+            result = self._ollama(system)
+            if result:
+                self.history.append({"role": "assistant", "content": result})
+                return self._clean(result)
+            # Ollama failed - try Groq
+            print("[MATCHA Brain] Ollama failed, trying Groq...")
+
+        result = self._groq(system)
+        if result:
+            self.history.append({"role": "assistant", "content": result})
+            return self._clean(result)
+
+        return "AI brain is unavailable. Install Ollama for local AI with no limits."
+
+    def _ollama(self, system: str) -> Optional[str]:
+        """Call local Ollama."""
+        try:
+            payload = json.dumps({
+                "model": self._ollama_model,
+                "messages": [{"role": "system", "content": system}, *self.history],
+                "stream": False,
+                "options": {"temperature": 0.7, "num_predict": 2048}
+            }).encode()
+
+            req = urllib.request.Request(
+                OLLAMA_URL,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=60) as r:
+                data = json.loads(r.read())
+                return data.get("message", {}).get("content", "").strip()
+        except Exception as e:
+            print(f"[MATCHA Brain] Ollama error: {e}")
+            return None
+
+    def _groq(self, system: str) -> Optional[str]:
+        """Call Groq API - cycles through models on rate limit."""
+        import time
+        try:
+            from groq import Groq
+            client = Groq(api_key=GROQ_API_KEY)
+            for model in GROQ_MODELS:
+                try:
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[{"role": "system", "content": system}, *self.history],
+                        temperature=0.65,
+                        max_tokens=2048,
+                        stream=False,
+                    )
+                    return response.choices[0].message.content.strip()
+                except Exception as e:
+                    if "rate_limit" in str(e).lower() or "429" in str(e):
+                        time.sleep(1)
+                        continue
+                    raise
+        except Exception as e:
+            print(f"[MATCHA Brain] Groq error: {e}")
+            return None
+
+    def _build_system(self, context: str = "") -> str:
+        now = datetime.datetime.now().strftime("%A, %d %b %Y at %H:%M")
+        s = SYSTEM_PROMPT.replace("{user_name}", self.user_name).replace("{datetime}", now)
+        if context:
+            s += f"\n\nSystem context: {context}"
+        return s
 
     def _clean(self, text: str) -> str:
-        """Strip filler openers."""
         patterns = [
-            r"^(certainly|of course|absolutely|sure|great question|happy to help|i'd be happy to|i'll help you with that)[!.,]?\s*",
+            r"^(certainly|of course|absolutely|sure|great question|happy to help|i'd be happy to)[!.,]?\s*",
             r"^(of course|no problem|sure thing)[!.,]?\s*",
             r"^(hello again,?\s+\w+\.?\s*)",
             r"^(hi there[!.,]?\s*)",
@@ -133,6 +176,19 @@ class MatchaBrain:
         return result.strip()
 
     def reset(self):
-        """Clear conversation history."""
         self.history = []
-        print("[MATCHA Brain] History cleared.")
+
+    def get_mode(self) -> str:
+        if self.mode == "ollama":
+            return f"Local Ollama ({self._ollama_model}) - unlimited, free"
+        return "Groq cloud (limited free tier)"
+
+    def install_instructions(self) -> str:
+        return (
+            "To get unlimited local AI with no rate limits:\n\n"
+            "1. Download Ollama: https://ollama.com/download\n"
+            "2. Install it (takes 2 minutes)\n"
+            "3. Open a terminal and run: ollama pull llama3.2\n"
+            "4. Restart MATCHA\n\n"
+            "After that MATCHA runs 100% on your machine - no internet needed for AI."
+        )

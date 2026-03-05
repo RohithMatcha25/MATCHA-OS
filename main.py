@@ -43,6 +43,14 @@ def reset():
     return jsonify({"success": True, "message": "Conversation cleared."})
 
 
+@app.route("/api/brain/status")
+def brain_status():
+    """Return brain mode - ollama or groq."""
+    if matcha._brain:
+        return jsonify({"mode": matcha._brain.get_mode(), "install": matcha._brain.install_instructions()})
+    return jsonify({"mode": "unavailable"})
+
+
 @app.route("/api/think", methods=["POST"])
 def think():
     """Main AI reasoning endpoint."""

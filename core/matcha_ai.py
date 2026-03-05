@@ -552,6 +552,12 @@ class MatchaAI:
                                   "your features", "your capabilities", "what else can you do"]):
             return "identity"
 
+        # ── Brain/AI mode ──
+        if any(w in t for w in ["install ollama", "setup ollama", "how to install ollama",
+                                  "local ai", "no rate limit", "offline ai", "what brain",
+                                  "which ai", "your ai model", "how do you work"]):
+            return "brain_info"
+
         # ── Capability questions — answer instantly without Groq ──
         if t.startswith("can you ") or t.startswith("could you ") or t.startswith("do you "):
             return "capability_question"
@@ -586,7 +592,14 @@ class MatchaAI:
                 "open apps, control your system, build real apps, and get smarter over time."
             )
 
-        elif intent == "capability_question":
+        elif intent == "brain_info":
+            if self._brain:
+                mode = self._brain.get_mode()
+                instructions = self._brain.install_instructions()
+                return f"**Current AI brain:** {mode}\n\n{instructions}"
+            return "Brain not loaded."
+
+
             t_lower = text.lower()
             # Map capability questions to direct answers
             caps = {
