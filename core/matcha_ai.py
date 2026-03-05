@@ -101,6 +101,8 @@ class MatchaAI:
         self._executor = None
         self._trainer = None
         self._evolution = None
+        self._browser_agent = None
+        self._persistent_memory = None
         self._init_brain()
         self._init_learner()
         self._init_perms()
@@ -108,6 +110,8 @@ class MatchaAI:
         self._init_executor()
         self._init_trainer()
         self._init_evolution()
+        self._init_browser_agent()
+        self._init_persistent_memory()
         print(f"[MATCHA] Core AI initialised — v{MATCHA_VERSION}")
 
     def _init_brain(self):
@@ -169,7 +173,6 @@ class MatchaAI:
         try:
             from core.evolution.matcha_evolution import MatchaEvolution
             self._evolution = MatchaEvolution()
-            # Kick off background learning on boot topics
             if self.online:
                 seed_topics = [
                     "artificial intelligence", "machine learning", "python programming",
@@ -179,6 +182,24 @@ class MatchaAI:
         except Exception as e:
             print(f"[MATCHA] Evolution unavailable: {e}")
             self._evolution = None
+
+    def _init_browser_agent(self):
+        """Load the browser automation agent."""
+        try:
+            from core.browser.matcha_browser import MatchaBrowserAgent
+            self._browser_agent = MatchaBrowserAgent()
+        except Exception as e:
+            print(f"[MATCHA] Browser agent unavailable: {e}")
+            self._browser_agent = None
+
+    def _init_persistent_memory(self):
+        """Load persistent cross-session memory."""
+        try:
+            from core.memory_persistent.matcha_memory_persistent import MatchaMemoryPersistent
+            self._persistent_memory = MatchaMemoryPersistent()
+        except Exception as e:
+            print(f"[MATCHA] Persistent memory unavailable: {e}")
+            self._persistent_memory = None
 
     def _load_retriever(self):
         """Load trained MATCHA model for fallback reasoning."""
@@ -298,6 +319,13 @@ class MatchaAI:
             # Learn in background — don't block response
             pass
 
+        # Log to persistent memory
+        if self._persistent_memory:
+            try:
+                self._persistent_memory.log_conversation("user", user_input)
+            except Exception:
+                pass
+
         # Update conversation context
         self._conversation_context.append({"role": "user", "text": user_input, "intent": intent})
 
@@ -307,39 +335,47 @@ class MatchaAI:
         # Apply MATCHA personality
         response = self.personality.format(response, intent)
 
-        # If response is an OPEN_URL command (no permission needed for info commands)
-        # or a permission request — return as-is
-        if response.startswith("__OPEN_URL__") or response.startswith("__ASK_PERMISSION__"):
+        # If response is an OPEN_URL, NEED_CREDS or ASK_PERMISSION — return as-is
+        if (response.startswith("__OPEN_URL__") or
+            response.startswith("__ASK_PERMISSION__") or
+            response.startswith("__NEED_CREDS__") or
+            response.startswith("__BUILD__ASYNC__")):
             return response
 
         # Log response
         self._conversation_context.append({"role": "matcha", "text": response})
 
-        # Self-learn: if we answered a factual query, remember it
+        # Log to persistent memory
+        if self._persistent_memory:
+            try:
+                self._persistent_memory.log_conversation("matcha", response)
+            except Exception:
+                pass
+
+        # Self-learn
         if self._learner and self.online and intent == "general":
             try:
                 self._learner.learn_and_store(
                     topic=self._learner._extract_topic(user_input),
                     fact=response[:500],
-                    source="groq_brain"
+                    source="brain"
                 )
             except Exception:
                 pass
 
-        # Log to trainer for self-improvement
+        # Log to trainer
         if self._trainer:
             try:
                 self._trainer.log(user_input, response, intent)
             except Exception:
                 pass
 
-        # Evolution: if online, deepen knowledge on repeated topics
+        # Evolution background crawl
         if self._evolution and self.online and intent == "general":
             try:
-                topic = user_input[:60]
                 threading.Thread(
                     target=self._evolution.learn_from_web,
-                    args=(topic,), daemon=True
+                    args=(user_input[:60],), daemon=True
                 ).start()
             except Exception:
                 pass
@@ -559,6 +595,37 @@ class MatchaAI:
                                   "your features", "your capabilities", "what else can you do"]):
             return "identity"
 
+        # ── Browser automation / web tasks ──
+        browser_services = ["linkedin", "instagram", "insta", "github", "gmail", "amazon",
+                            "twitter", "facebook", "uber", "deliveroo", "just eat", "ubereats",
+                            "youtube", "netflix", "spotify", "whatsapp", "telegram"]
+        browser_actions = ["login", "log in", "sign in", "open my", "access my", "go to my",
+                           "check my", "update my", "apply for", "order", "post on", "message on",
+                           "search on", "find jobs on", "upload to"]
+        if any(svc in t for svc in browser_services) and any(act in t for act in browser_actions):
+            return "browser_task"
+        if any(w in t for w in ["login to", "log into", "sign into", "access my account"]):
+            return "browser_task"
+
+        # ── Save credentials ──
+        if any(w in t for w in ["my username is", "my password is", "my email is",
+                                  "save my credentials", "store my login", "remember my password"]):
+            return "save_credentials"
+
+        # ── Persistent memory ──
+        if any(w in t for w in ["remember that", "remember this", "don't forget", "keep this in mind",
+                                  "save this", "note that", "store this"]):
+            return "memory_store"
+        if any(w in t for w in ["what do you remember", "what do you know about me",
+                                  "my memories", "recall", "what have i told you",
+                                  "show my memories", "forget that", "forget this"]):
+            return "memory_recall"
+
+        # ── Task status ──
+        if any(w in t for w in ["task status", "what are you doing", "any updates",
+                                  "task progress", "background tasks"]):
+            return "task_status"
+
         # ── Brain/AI mode ──
         if any(w in t for w in ["install ollama", "setup ollama", "how to install ollama",
                                   "local ai", "no rate limit", "offline ai", "what brain",
@@ -598,6 +665,78 @@ class MatchaAI:
                 "MATCHA - your local AI OS. I run on your machine, answer questions, "
                 "open apps, control your system, build real apps, and get smarter over time."
             )
+
+        # ── Browser Task ──────────────────────────────────────────────────────────
+        elif intent == "browser_task":
+            if not self._browser_agent:
+                return "Browser agent unavailable."
+            t_lower = text.lower()
+            # Detect service
+            services = {
+                "linkedin": "LinkedIn", "instagram": "Instagram", "insta": "Instagram",
+                "github": "GitHub", "gmail": "Gmail", "amazon": "Amazon",
+                "twitter": "Twitter", "facebook": "Facebook", "uber": "Uber",
+                "deliveroo": "Deliveroo", "just eat": "Just Eat",
+                "ubereats": "UberEats", "netflix": "Netflix", "spotify": "Spotify",
+            }
+            service = "web"
+            for key, name in services.items():
+                if key in t_lower:
+                    service = name
+                    break
+            # Ask permission first
+            if self._perms:
+                perm = self._perms.needs_permission(
+                    "open_browser", service,
+                    {"url": f"https://{service.lower()}.com", "label": service}
+                )
+                if perm.get("ask"):
+                    return perm["message"]
+            return self._browser_agent.login_and_act(service, text, self._brain)
+
+        # ── Save Credentials ──────────────────────────────────────────────────────
+        elif intent == "save_credentials":
+            t_lower = text.lower()
+            # Extract service, username, password
+            import re as _re
+            # Pattern: "my linkedin username is X and password is Y"
+            svc_match = _re.search(r'my (\w+) (?:username|email|login) is ([^\s]+)', t_lower)
+            pwd_match = _re.search(r'(?:password|pass) is ([^\s]+)', text)
+            if svc_match and pwd_match and self._browser_agent:
+                service = svc_match.group(1)
+                username = svc_match.group(2)
+                password = pwd_match.group(1)
+                result = self._browser_agent.store_credentials(service, username, password)
+                return f"{result}\n\nYour credentials are encrypted and stored only on your machine."
+            return "Tell me like this: 'my linkedin username is john@email.com and password is mypass123'"
+
+        # ── Memory Store ──────────────────────────────────────────────────────────
+        elif intent == "memory_store":
+            if self._persistent_memory:
+                # Extract what to remember
+                t_clean = text.lower()
+                for phrase in ["remember that", "remember this", "don't forget", "keep this in mind",
+                               "save this", "note that", "store this"]:
+                    t_clean = t_clean.replace(phrase, "").strip()
+                self._persistent_memory.remember("user_notes", t_clean[:100], t_clean)
+                return f"Remembered: '{t_clean}' — stored locally and will persist across sessions."
+            return "Persistent memory not available."
+
+        # ── Memory Recall ─────────────────────────────────────────────────────────
+        elif intent == "memory_recall":
+            if self._persistent_memory:
+                t_lower = text.lower()
+                if "forget" in t_lower:
+                    key = t_lower.replace("forget that", "").replace("forget this", "").strip()
+                    return self._persistent_memory.forget(key)
+                return self._persistent_memory.format_memories() or "Nothing stored yet."
+            return "Persistent memory not available."
+
+        # ── Task Status ───────────────────────────────────────────────────────────
+        elif intent == "task_status":
+            if self._browser_agent:
+                return self._browser_agent.get_task_status()
+            return "No background tasks running."
 
         elif intent == "brain_info":
             if self._brain:
