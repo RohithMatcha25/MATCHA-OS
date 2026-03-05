@@ -463,15 +463,22 @@ class MatchaAI:
                                   "run code", "test this code"]):
             return "run_code"
 
-        # ── Self-train / retrain ──
-        if any(w in t for w in ["retrain", "update your model", "update your training",
-                                  "train yourself", "improve yourself", "update your knowledge",
-                                  "self train", "self-train"]):
+        # ── Self-evolve / evolve yourself — honest handler ──
+        if any(w in t for w in ["evolve yourself", "self evolve", "self-evolve",
+                                  "evolve itself", "rewrite your", "update your weights",
+                                  "update your training", "retrain yourself", "improve yourself",
+                                  "self improve", "self-improve", "modify yourself",
+                                  "upgrade yourself", "do it", "do it yourself"]):
+            return "self_evolve_request"
+
+        # ── Self-train intent model from usage data ──
+        if any(w in t for w in ["retrain", "update your model", "self train", "self-train",
+                                  "train yourself"]):
             return "self_retrain"
 
-        # ── Evolution / learn from web ──
+        # ── Learn about a topic from web ──
         if any(w in t for w in ["learn about", "research", "study", "find out about",
-                                  "what do you know about", "evolve", "update yourself"]):
+                                  "what do you know about"]):
             return "evolve_learn"
 
         # ── What have you learned / evolution stats ──
@@ -606,7 +613,8 @@ class MatchaAI:
                 ("code", "program", "programming"): "Yes - Python, JavaScript, HTML/CSS, React, Django, SQL, Bash. What do you need?",
                 ("build", "create", "make", "develop"): "Yes. Tell me what you want - 'build me a todo app' and I'll write it, run it, and give you a URL.",
                 ("website", "web app", "webapp"): "Yes. Give me the spec and I'll build the whole thing and run it locally.",
-                ("learn", "self learn", "evolve", "improve"): "Yes. I learn from every conversation and crawl the web in the background. I get smarter the more you use me.",
+                ("self learn", "learn from web", "learn over time"): "Yes. I crawl Wikipedia and DuckDuckGo in the background and store facts locally. I get smarter over time.",
+                ("evolve", "self evolve", "evolve yourself", "improve yourself"): "Not in the way you mean. I can't rewrite my own weights — no AI can. But I do learn from the web and from our conversations. Say 'retrain yourself' to update my intent model from usage.",
                 ("remember", "memory"): "Within a session, yes. Across sessions, I store facts in a local database.",
                 ("open", "launch", "run app"): "Yes. I can open any app or website on your machine.",
                 ("system", "control", "os"): "Yes. I can check CPU/RAM/disk, open apps, control volume, list files, and more.",
@@ -976,6 +984,18 @@ class MatchaAI:
             if code_match:
                 return self._executor.run_code(code_match.group(1))
             return "Paste your code in a code block (```python ... ```) and I'll run it."
+
+        elif intent == "self_evolve_request":
+            return (
+                "I can't rewrite my own neural network weights or modify my core training. "
+                "No AI can do this at runtime — not ChatGPT, not Gemini, not anything available today.\n\n"
+                "What I CAN actually do that gets smarter over time:\n"
+                "- **Learn from web** — I crawl Wikipedia and DuckDuckGo in the background and store facts locally\n"
+                "- **Retrain intent model** — say 'retrain yourself' and I update my intent detection from our conversations\n"
+                "- **Build new skills** — I can write and load new Python modules that give me real new capabilities\n"
+                "- **Ollama upgrade** — you can swap my brain to a bigger model anytime (llama3.1, mistral, etc)\n\n"
+                "These are real. Everything else is fake."
+            )
 
         elif intent == "self_retrain":
             if not self._trainer:
