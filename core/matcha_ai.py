@@ -748,12 +748,8 @@ class MatchaAI:
                     service_key = key
                     break
 
-            # ── Get credentials — try multiple key variants ───────────────────
-            creds = None
-            for attempt in [service_key, service_key.title(), service_key.upper()]:
-                creds = self._browser_agent.get_credentials(attempt)
-                if creds:
-                    break
+            # ── Get credentials — always lowercase (that's how they're stored) ─
+            creds = self._browser_agent.get_credentials(service_key.lower())
 
             if not creds:
                 return (
@@ -871,17 +867,24 @@ class MatchaAI:
             )
 
             # ── Extract password — handles typos: passwrod, passw, passwd ─────
+            # Must skip "is" as a value — the actual password follows "is" or ":"
             pwd_match = _re.search(
-                r'pass\w*\s*[:\-]?\s*([^\s,]+)',
+                r'pass\w*\s*(?:is\s+|[:\-]\s*)([^\s,]+)',
                 t_orig, _re.IGNORECASE
             )
+            # Ensure we didn't accidentally capture "is" itself
+            if pwd_match and pwd_match.group(1).lower() == "is":
+                pwd_match = _re.search(
+                    r'pass\w*\s+is\s+(\S+)',
+                    t_orig, _re.IGNORECASE
+                )
 
             if user_match and pwd_match:
                 username = user_match.group(1).strip().rstrip(".,")
                 password = pwd_match.group(1).strip().rstrip(".,")
 
                 if self._browser_agent:
-                    self._browser_agent.store_credentials(service, username, password)
+                    self._browser_agent.store_credentials(service.lower(), username, password)
                 if self._persistent_memory:
                     self._persistent_memory.remember("credentials", service, f"saved ({username})")
 
