@@ -598,6 +598,13 @@ class MatchaAI:
                                   "your features", "your capabilities", "what else can you do"]):
             return "identity"
 
+        # ── Task status — MUST be before browser_task ──
+        if t.startswith("did you") or t.startswith("have you") or any(
+            w in t for w in ["task status", "task progress", "background tasks",
+                              "did you complete", "did you finish", "what happened with",
+                              "is it done", "any updates"]):
+            return "task_status"
+
         # ── Save credentials — MUST be before browser_task ──
         if (any(w in t for w in ["username is", "password is", "my email is",
                                    "save my credentials", "store my login"]) and
@@ -630,10 +637,22 @@ class MatchaAI:
                                   "task progress", "background tasks"]):
             return "task_status"
 
+        # ── Credential questions — MUST intercept before brain ──
+        if any(w in t for w in ["do you have my", "did you save", "my credentials",
+                                  "do you know my", "my linkedin", "my instagram",
+                                  "my github", "my gmail", "my password", "my login",
+                                  "saved my", "have you got my"]):
+            return "credential_check"
+
+        # ── Task status questions ──
+        if any(w in t for w in ["did you login", "did you do it", "what happened",
+                                  "any update", "is it done", "have you logged",
+                                  "did you complete", "what did you do", "status"]):
+            return "task_status"
+
         # ── Brain/AI mode ──
-        if any(w in t for w in ["install ollama", "setup ollama", "how to install ollama",
-                                  "local ai", "no rate limit", "offline ai", "what brain",
-                                  "which ai", "your ai model", "how do you work"]):
+        if any(w in t for w in ["install ollama", "setup ollama", "local ai",
+                                  "which ai", "your ai model"]):
             return "brain_info"
 
         # ── Capability questions — answer instantly without Groq ──
@@ -768,8 +787,29 @@ class MatchaAI:
         # ── Task Status ───────────────────────────────────────────────────────────
         elif intent == "task_status":
             if self._browser_agent:
-                return self._browser_agent.get_task_status()
+                status = self._browser_agent.get_task_status()
+                saved = self._browser_agent.list_saved_services()
+                cred_info = f"\n\nSaved credentials for: {', '.join(saved)}" if saved else ""
+                return status + cred_info
             return "No background tasks running."
+
+        elif intent == "credential_check":
+            if not self._browser_agent:
+                return "Browser agent not available."
+            saved = self._browser_agent.list_saved_services()
+            t_lower = text.lower()
+            # Check specific service
+            for svc in ["linkedin", "instagram", "github", "gmail", "amazon", "twitter"]:
+                if svc in t_lower:
+                    creds = self._browser_agent.get_credentials(svc)
+                    if creds:
+                        return f"Yes, I have your {svc.title()} credentials saved (username: {creds['username']}). Say 'login to my {svc}' to use them."
+                    else:
+                        return f"No credentials saved for {svc.title()} yet. Say: 'my {svc} username is email@x.com and password is yourpass'"
+            # General check
+            if saved:
+                return f"I have credentials saved for: **{', '.join(saved)}**\n\nSay 'login to my [service]' to use them."
+            return "No credentials saved yet. Say: 'my linkedin username is email@x.com and password is yourpass'"
 
         elif intent == "brain_info":
             if self._brain:
