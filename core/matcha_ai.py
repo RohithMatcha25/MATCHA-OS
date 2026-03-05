@@ -548,8 +548,13 @@ class MatchaAI:
 
         # ── Identity ──
         if any(w in t for w in ["who are you", "what are you", "your name", "what can you do",
-                                  "what do you do", "tell me about yourself", "introduce yourself"]):
+                                  "what do you do", "tell me about yourself", "introduce yourself",
+                                  "your features", "your capabilities", "what else can you do"]):
             return "identity"
+
+        # ── Capability questions — answer instantly without Groq ──
+        if t.startswith("can you ") or t.startswith("could you ") or t.startswith("do you "):
+            return "capability_question"
 
         # ── Greeting ──
         if re.search(r'^(hi|hello|hey|howdy|yo)\b', t) or any(w in t for w in [
@@ -566,29 +571,48 @@ class MatchaAI:
 
         # ── Greeting ──────────────────────────────────────────────────────────────
         if intent == "greeting":
-            if self._brain and self.online:
-                return self._reason(text)
             name = self.user_name if self.user_name != "User" else ""
-            suffix = f", {name}" if name else ""
             if hour < 12:
-                return f"Morning{suffix}. What do you need?"
+                return f"Morning{', ' + name if name else ''}. What do you need?"
             elif hour < 17:
-                return f"Hey{suffix}. What can I do for you?"
+                return f"Hey{', ' + name if name else ''}. What can I do for you?"
             else:
-                return f"Evening{suffix}. What do you need?"
+                return f"Evening{', ' + name if name else ''}. What do you need?"
 
         # ── Identity ──────────────────────────────────────────────────────────────
         elif intent == "identity":
-            if self._brain and self.online:
-                return self._reason(text)
             return (
-                "MATCHA OS — your AI operating system. "
-                "I can answer anything, write code, control your system, "
-                "check weather, set reminders, open apps, and more. What do you need?"
+                "MATCHA - your local AI OS. I run on your machine, answer questions, "
+                "open apps, control your system, build real apps, and get smarter over time."
             )
 
-        # ── Open browser app (YouTube, Gmail, etc.) ──────────────────────────────
-        elif intent == "open_browser_app":
+        elif intent == "capability_question":
+            t_lower = text.lower()
+            # Map capability questions to direct answers
+            caps = {
+                ("code", "program", "programming"): "Yes - Python, JavaScript, HTML/CSS, React, Django, SQL, Bash. What do you need?",
+                ("build", "create", "make", "develop"): "Yes. Tell me what you want - 'build me a todo app' and I'll write it, run it, and give you a URL.",
+                ("website", "web app", "webapp"): "Yes. Give me the spec and I'll build the whole thing and run it locally.",
+                ("learn", "self learn", "evolve", "improve"): "Yes. I learn from every conversation and crawl the web in the background. I get smarter the more you use me.",
+                ("remember", "memory"): "Within a session, yes. Across sessions, I store facts in a local database.",
+                ("open", "launch", "run app"): "Yes. I can open any app or website on your machine.",
+                ("system", "control", "os"): "Yes. I can check CPU/RAM/disk, open apps, control volume, list files, and more.",
+                ("weather"): "Yes. Ask 'weather in [city]'.",
+                ("news"): "Yes. Ask 'latest news'.",
+                ("search"): "Yes. Ask me anything and I'll search the web.",
+                ("voice", "speak", "talk"): "Yes. Click the mic button or say your message - I understand speech.",
+            }
+            for keywords, answer in caps.items():
+                if isinstance(keywords, str):
+                    if keywords in t_lower:
+                        return answer
+                else:
+                    if any(k in t_lower for k in keywords):
+                        return answer
+            # Generic capability question
+            return "Yes, most likely. Tell me what you need and I'll do it."
+
+
             app_name = self._extract_open_target(text)
             app_lower = app_name.lower()
             url = None
@@ -1131,62 +1155,66 @@ class MatchaAI:
         return text
 
     def _reason(self, text: str) -> str:
-        """Primary reasoning — Groq brain first, local knowledge, web thinker fallback."""
-        # 0. Check local learned knowledge first (fast, free)
-        if self._learner and self.online:
-            local_knowledge = self._learner.recall(text)
-            if local_knowledge and len(local_knowledge) > 20:
-                # Enhance with brain if available
-                if self._brain:
-                    try:
-                        ctx = f"Known fact: {local_knowledge}\nAnswer the user's question using this and your own knowledge."
-                        answer = self._brain.think(text, system_context=ctx)
-                        if answer and len(answer) > 2:
-                            # Store improved answer
-                            self._learner.learn_and_store(
-                                self._learner._extract_topic(text), answer[:500], "groq_enhanced"
-                            )
-                            return answer
-                    except Exception:
-                        pass
-                return local_knowledge
+        """Primary reasoning: instant local -> Groq (multi-model) -> web thinker."""
+        t = text.lower().strip()
 
-        # 1. Groq brain — real intelligence (if available)
+        # 0. Instant local answers - never hit Groq for these
+        instant_map = {
+            "who are you": f"MATCHA - your local AI OS. I run on your machine, answer questions, open apps, control your system, and build real apps.",
+            "what are you": f"MATCHA - your local AI OS. I run on your machine, answer questions, open apps, control your system, and build real apps.",
+            "what is matcha": "MATCHA OS - an AI operating system that runs on your machine. I answer anything, build apps, control your system, and get smarter over time.",
+            "hello": f"Hey {self.user_name}. What do you need?",
+            "hi": f"Hey. What do you need?",
+            "hey": f"Hey. What do you need?",
+            "hi matcha": f"Hey {self.user_name}. What do you need?",
+            "hello matcha": f"Hey {self.user_name}. What do you need?",
+            "thank you": "No problem.",
+            "thanks": "No problem.",
+            "ty": "No problem.",
+            "what can you do": "I can: answer any question, build and run real apps/websites, open apps and websites, control your system (volume, brightness, shutdown), list files and folders, show system info, get weather and news, set reminders and notes, run and debug code, learn from the web.",
+            "what do you do": "I answer questions, build apps, control your system, and get smarter the more you use me.",
+            "your capabilities": "I can build apps, answer anything, control your OS, browse files, check system stats, get weather/news, set reminders, and run code.",
+        }
+        if t in instant_map:
+            return instant_map[t]
+
+        # 1. Local learned knowledge (free, instant)
+        if self._learner and self.online:
+            try:
+                local_knowledge = self._learner.recall(text)
+                if local_knowledge and len(local_knowledge) > 20:
+                    return local_knowledge
+            except Exception:
+                pass
+
+        # 2. Groq brain (cycles through 4 models on rate limit)
         if self.online and self._brain:
             try:
-                import datetime as _dt
-                ctx = f"Time: {_dt.datetime.now().strftime('%H:%M, %d %b %Y')}. User: {self.user_name}."
-                answer = self._brain.think(text, system_context=ctx)
+                answer = self._brain.think(text)
                 if answer and len(answer) > 2:
-                    # Self-learn from brain's answer
                     if self._learner:
                         try:
-                            topic = self._learner._extract_topic(text)
-                            self._learner.learn_and_store(topic, answer[:500], "groq_brain")
-                            # Check if user has asked this 3+ times — deepen knowledge
-                            self._learner._track_interest(topic)
-                            interests = dict(self._learner.get_top_interests(20))
-                            if interests.get(topic, 0) >= 3:
-                                self._learner.deepen_knowledge(topic)
+                            self._learner.learn_and_store(
+                                self._learner._extract_topic(text), answer[:500], "groq_brain"
+                            )
                         except Exception:
                             pass
                     return answer
             except Exception:
                 pass
 
-        # 2. Known patterns (instant OS commands)
+        # 3. Local retriever patterns
         result = self._retriever_predict(text)
         if result:
             return result
 
-        # 3. Web thinker fallback
+        # 4. Web thinker fallback
         if self.online:
             try:
                 thinker = self._get_thinker()
                 if thinker:
                     answer = thinker.think(text)
                     if answer and len(answer) > 10:
-                        # Learn this too
                         if self._learner:
                             try:
                                 self._learner.learn_and_store(
@@ -1195,10 +1223,10 @@ class MatchaAI:
                             except Exception:
                                 pass
                         return answer
-            except:
+            except Exception:
                 pass
 
-        return "I need an internet connection to answer that. Connect and try again."
+        return "I need an internet connection to answer that."
 
     def get_learning_stats(self) -> str:
         """Return what MATCHA has learned so far."""

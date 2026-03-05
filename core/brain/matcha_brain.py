@@ -9,7 +9,13 @@ import datetime
 from typing import Optional
 
 GROQ_API_KEY = "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"
-MODEL = "llama-3.3-70b-versatile"
+# Model priority: try fastest/highest-limit first, fall back if rate limited
+MODELS = [
+    "llama-3.1-8b-instant",      # 20,000 req/day, 6,000 tokens/min — fastest
+    "llama-3.3-70b-versatile",   # 14,400 req/day — smartest
+    "gemma2-9b-it",              # separate quota
+    "mixtral-8x7b-32768",        # separate quota
+]
 
 SYSTEM_PROMPT = (
     "You are MATCHA - an AI assistant built into an operating system running on the user's computer.\n\n"
@@ -76,49 +82,40 @@ class MatchaBrain:
         print("[MATCHA Brain] Groq + Llama 3.3 70B - Premium mode ready.")
 
     def think(self, user_message: str, system_context: str = "") -> str:
-        """Generate a response — with auto-retry on rate limit."""
+        """Generate a response — cycles through models on rate limit."""
         import time
-        for attempt in range(3):
+        now = datetime.datetime.now().strftime("%A, %d %b %Y at %H:%M")
+        system = SYSTEM_PROMPT.replace("{user_name}", self.user_name).replace("{datetime}", now)
+        if system_context:
+            system += f"\n\nSystem data: {system_context}"
+
+        self.history.append({"role": "user", "content": user_message})
+        if len(self.history) > self.max_history:
+            self.history = self.history[-self.max_history:]
+
+        for model in MODELS:
             try:
-                now = datetime.datetime.now().strftime("%A, %d %b %Y at %H:%M")
-                system = SYSTEM_PROMPT.replace("{user_name}", self.user_name).replace("{datetime}", now)
-
-                if system_context:
-                    system += f"\n\nSystem data: {system_context}"
-
-                self.history.append({"role": "user", "content": user_message})
-                if len(self.history) > self.max_history:
-                    self.history = self.history[-self.max_history:]
-
                 response = self.client.chat.completions.create(
-                    model=MODEL,
-                    messages=[
-                        {"role": "system", "content": system},
-                        *self.history
-                    ],
+                    model=model,
+                    messages=[{"role": "system", "content": system}, *self.history],
                     temperature=0.65,
                     max_tokens=2048,
                     top_p=1,
                     stream=False,
                 )
-
-                answer = response.choices[0].message.content.strip()
-                answer = self._clean(answer)
+                answer = self._clean(response.choices[0].message.content.strip())
                 self.history.append({"role": "assistant", "content": answer})
                 return answer
-
             except Exception as e:
-                error = str(e)
-                if "rate_limit" in error.lower():
-                    if attempt < 2:
-                        wait = (attempt + 1) * 5
-                        time.sleep(wait)
-                        continue
-                    return "Groq is busy right now — try again in a moment."
-                elif "auth" in error.lower() or "api_key" in error.lower():
+                err = str(e).lower()
+                if "rate_limit" in err or "429" in err:
+                    time.sleep(1)
+                    continue  # try next model
+                elif "auth" in err or "api_key" in err:
                     return "Groq API key issue."
-                return f"Error: {error}"
-        return "Could not get a response. Try again."
+                return f"Error: {e}"
+
+        return "All AI models are busy right now. Try again in 30 seconds."
 
     def _clean(self, text: str) -> str:
         """Strip filler openers."""
