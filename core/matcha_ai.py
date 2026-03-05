@@ -442,10 +442,15 @@ class MatchaAI:
                 return "store_install"
 
         # ── Build / create app ──
-        build_triggers = ["build", "create", "make", "develop", "code me", "write me a"]
+        # "can you build" = capability question, NOT a build request
+        # Only trigger builder when user actually says "build me X" / "create a X" / "make me a X"
+        build_triggers = ["build me", "create me", "make me", "develop me", "build a", "create a",
+                          "make a", "develop a", "code me a", "write me a", "i want you to build",
+                          "i want a", "can you make me", "can you build me", "make an", "build an", "create an"]
         build_targets = ["app", "website", "web app", "webapp", "tool", "dashboard",
                          "todo", "calculator", "game", "chat app", "portfolio", "landing page",
-                         "api", "backend", "frontend", "full stack"]
+                         "api", "backend", "frontend", "full stack", "quiz", "timer", "weather app",
+                         "notes app", "blog", "store", "shop", "tracker"]
         if any(bt in t for bt in build_triggers) and any(tg in t for tg in build_targets):
             return "build_app"
 

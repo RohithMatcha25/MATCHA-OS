@@ -27,8 +27,12 @@ class MatchaExecutor:
 
         port = self._free_port()
         code = self._generate(request, port, brain)
-        if not code:
-            return "Could not generate code. Try again with more detail."
+
+        # Bail out if brain returned an error/rate-limit message instead of code
+        if not code or len(code) < 50:
+            return "Could not generate code — try again in a moment."
+        if not self._is_valid_python(code):
+            return "Brain returned an error instead of code (likely rate limited). Wait a few seconds and try again."
 
         app_file = os.path.join(app_dir, "app.py")
         with open(app_file, "w", encoding="utf-8") as f:
@@ -40,22 +44,22 @@ class MatchaExecutor:
         if result == "ok":
             url = f"http://localhost:{port}"
             self.running[slug]["url"] = url
-            return f"✅ **Built and running.**\n\nOpen: **{url}**\nFiles: `{app_dir}`"
+            return f"Built and running.\n\nOpen: **{url}**\nFiles saved to: `{app_dir}`"
 
         # Auto-fix on error
         err = result
         fixed = self._fix(code, err, port, brain)
-        if fixed:
+        if fixed and self._is_valid_python(fixed):
             with open(app_file, "w", encoding="utf-8") as f:
                 f.write(fixed)
             result2 = self._start(slug, app_file, app_dir, port)
             if result2 == "ok":
                 url = f"http://localhost:{port}"
                 self.running[slug]["url"] = url
-                return f"✅ **Built and running** (auto-fixed).\n\nOpen: **{url}**\nFiles: `{app_dir}`"
-            return f"Build failed after auto-fix:\n```\n{result2[:300]}\n```"
+                return f"Built and running (auto-fixed).\n\nOpen: **{url}**\nFiles saved to: `{app_dir}`"
+            return f"Build failed. Error:\n```\n{result2[:300]}\n```"
 
-        return f"Build failed:\n```\n{err[:300]}\n```"
+        return f"Build failed. Try again in a moment (Groq may be rate-limited)."
 
     def run_code(self, code: str, lang: str = "python") -> str:
         """Execute arbitrary code and return output."""
@@ -123,6 +127,15 @@ class MatchaExecutor:
         )
         raw = brain.think(prompt)
         return self._extract(raw)
+
+    def _is_valid_python(self, code: str) -> bool:
+        """Check if code is valid Python syntax."""
+        try:
+            import ast
+            ast.parse(code)
+            return True
+        except SyntaxError:
+            return False
 
     def _extract(self, text: str) -> str:
         m = re.search(r"```(?:python)?\n(.*?)```", text, re.DOTALL)
