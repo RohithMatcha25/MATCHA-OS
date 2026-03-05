@@ -447,7 +447,10 @@ class MatchaAI:
         if any(w in t for w in ["running apps", "running processes", "list processes",
                                   "show processes", "what's running", "active apps"]):
             return "process_list"
-        if re.search(r'\b(cpu|ram|memory usage|disk space|system info|battery|charge level|storage|username|user name|whoami|my name on this|computer name|hostname|system user)\b', t):
+        if re.search(r'\b(cpu|ram|memory usage|disk space|system info|battery|charge level|storage|whoami|computer name|hostname|system user)\b', t):
+            return "system_info"
+        # username/user name only if asking about it, not providing it
+        if re.search(r'\b(my username|what is my username|show username|get username|system username)\b', t) and "is " not in t:
             return "system_info"
 
         # ── Open app or website ──
@@ -595,6 +598,12 @@ class MatchaAI:
                                   "your features", "your capabilities", "what else can you do"]):
             return "identity"
 
+        # ── Save credentials — MUST be before browser_task ──
+        if (any(w in t for w in ["username is", "password is", "my email is",
+                                   "save my credentials", "store my login"]) and
+                any(c in t for c in ["@", "password", "pass"])):
+            return "save_credentials"
+
         # ── Browser automation / web tasks ──
         browser_services = ["linkedin", "instagram", "insta", "github", "gmail", "amazon",
                             "twitter", "facebook", "uber", "deliveroo", "just eat", "ubereats",
@@ -606,11 +615,6 @@ class MatchaAI:
             return "browser_task"
         if any(w in t for w in ["login to", "log into", "sign into", "access my account"]):
             return "browser_task"
-
-        # ── Save credentials ──
-        if any(w in t for w in ["my username is", "my password is", "my email is",
-                                  "save my credentials", "store my login", "remember my password"]):
-            return "save_credentials"
 
         # ── Persistent memory ──
         if any(w in t for w in ["remember that", "remember this", "don't forget", "keep this in mind",
@@ -698,19 +702,46 @@ class MatchaAI:
 
         # ── Save Credentials ──────────────────────────────────────────────────────
         elif intent == "save_credentials":
-            t_lower = text.lower()
-            # Extract service, username, password
             import re as _re
-            # Pattern: "my linkedin username is X and password is Y"
-            svc_match = _re.search(r'my (\w+) (?:username|email|login) is ([^\s]+)', t_lower)
-            pwd_match = _re.search(r'(?:password|pass) is ([^\s]+)', text)
-            if svc_match and pwd_match and self._browser_agent:
-                service = svc_match.group(1)
-                username = svc_match.group(2)
-                password = pwd_match.group(1)
+            t_orig = text
+            t_lower = text.lower()
+
+            # Detect service from context
+            service = "web"
+            for svc in ["linkedin", "instagram", "github", "gmail", "amazon", "twitter",
+                        "facebook", "netflix", "spotify", "deliveroo"]:
+                if svc in t_lower:
+                    service = svc.title()
+                    break
+
+            # Extract username/email — handles "username is X", "email is X", "my username is X"
+            user_match = _re.search(
+                r'(?:my\s+)?(?:\w+\s+)?(?:username|email|login)\s+is\s+([^\s]+)',
+                t_lower
+            )
+            # Extract password — case-sensitive match to preserve special chars
+            pwd_match = _re.search(
+                r'(?:password|pass(?:word)?)\s+is\s+([^\s]+)',
+                t_orig, re.IGNORECASE
+            )
+
+            if user_match and pwd_match and self._browser_agent:
+                username = user_match.group(1).strip()
+                password = pwd_match.group(1).strip()
                 result = self._browser_agent.store_credentials(service, username, password)
-                return f"{result}\n\nYour credentials are encrypted and stored only on your machine."
-            return "Tell me like this: 'my linkedin username is john@email.com and password is mypass123'"
+                # Also store in persistent memory (no plain password stored in memory)
+                if self._persistent_memory:
+                    self._persistent_memory.remember("credentials", service, f"saved ({username})")
+                return (
+                    f"Credentials for **{service}** saved securely on your machine.\n\n"
+                    f"Username: {username}\n"
+                    f"To use: say 'login to my {service.lower()}'"
+                )
+
+            return (
+                f"I detected {service} credentials but couldn't parse them.\n\n"
+                f"Say: **my {service.lower()} username is email@x.com and password is mypassword**"
+            )
 
         # ── Memory Store ──────────────────────────────────────────────────────────
         elif intent == "memory_store":
