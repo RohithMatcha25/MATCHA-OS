@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>MATCHA OS</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+    :root {
+      --green: #4ADE80;
+      --green-dim: rgba(74,222,128,0.15);
+      --green-glow: rgba(74,222,128,0.35);
+      --bg: #0A0A0A;
+      --bg2: #111111;
+      --bg3: #1a1a1a;
+      --text: #F0F0F0;
+      --text-dim: #555;
+      --text-mid: #888;
+      --font: -apple-system, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+    }
+
+    html, body {
+      height: 100%;
+      width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      overflow: hidden;
+    }
+
+    /* ── Boot ── */
+    #boot {
+      position: fixed; inset: 0; background: #000;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 999; transition: opacity 0.8s ease;
+    }
+    #boot.fade { opacity: 0; pointer-events: none; }
+
+    .boot-ring {
+      width: 64px; height: 64px; border-radius: 50%;
+      border: 1.5px solid var(--green);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem; color: var(--green); font-weight: 300;
+      letter-spacing: 0.05em; margin-bottom: 1.5rem;
+      animation: glow 2s ease-in-out infinite;
+    }
+
+    .boot-text {
+      font-size: 0.8rem; color: var(--text-dim);
+      letter-spacing: 0.2em; text-transform: uppercase;
+      animation: fadeUp 1s ease 0.5s both;
+    }
+
+    /* ── App Shell ── */
+    #app {
+      display: flex; flex-direction: column;
+      height: 100vh; height: 100dvh;
+      width: 100%;
+    }
+
+    /* ── Header ── */
+    #header {
+      display: flex; align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid #1a1a1a;
+      flex-shrink: 0;
+    }
+    .logo {
+      font-size: 0.85rem; font-weight: 600;
+      letter-spacing: 0.25em; color: var(--green);
+      text-transform: uppercase;
+    }
+
+    .mode-badge {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.65rem; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--text-dim);
+    }
+
+    .mode-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #333;
+    }
+    .mode-dot.online { background: var(--green); animation: pulse 2s infinite; }
+
+    /* ── Chat Area ── */
+    #chat {
+      flex: 1;
+      overflow-y: scroll;  /* always scrollable */
+      overflow-x: hidden;
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      -webkit-overflow-scrolling: touch;
+      scroll-behavior: smooth;
+    }
+
+    /* push messages to bottom when few */
+    #chat-inner {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 100%;
+      justify-content: flex-end;
+    }
+
+    #chat::-webkit-scrollbar { width: 4px; }
+    #chat::-webkit-scrollbar-track { background: transparent; }
+    #chat::-webkit-scrollbar-thumb { background: #222; border-radius: 2px; }
+
+    /* ── Messages ── */
+    .msg {
+      display: flex;
+      max-width: 88%;
+      animation: fadeUp 0.3s ease both;
+    }
+
+    .msg.user { align-self: flex-end; }
+    .msg.matcha { align-self: flex-start; }
+
+    .bubble {
+      padding: 10px 14px;
+      border-radius: 18px;
+      font-size: 0.9rem;
+      line-height: 1.55;
+      word-break: break-word;
+    }
+
+    .msg.user .bubble {
+      background: var(--green);
+      color: #000;
+      border-bottom-right-radius: 4px;
+      font-weight: 500;
+    }
+
+    .msg.matcha .bubble {
+      background: var(--bg3);
+      color: var(--text);
+      border-bottom-left-radius: 4px;
+      border: 1px solid #222;
+    }
+
+    /* ── Markdown in matcha bubbles ── */
+    .msg.matcha .bubble p { margin-bottom: 0.5em; }
+    .msg.matcha .bubble p:last-child { margin-bottom: 0; }
+    .msg.matcha .bubble strong { color: var(--green); font-weight: 600; }
+    .msg.matcha .bubble em { color: #aaa; font-style: italic; }
+    .msg.matcha .bubble code {
+      background: #0d0d0d;
+      color: var(--green);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.82em;
+    }
+    .msg.matcha .bubble pre {
+      background: #0d0d0d;
+      border: 1px solid #252525;
+      border-radius: 8px;
+      padding: 12px;
+      margin: 8px 0;
+      overflow-x: auto;
+    }
+    .msg.matcha .bubble pre code {
+      background: none;
+      padding: 0;
+      font-size: 0.82em;
+      line-height: 1.6;
+    }
+    .msg.matcha .bubble ul, .msg.matcha .bubble ol {
+      padding-left: 1.2em;
+      margin: 0.4em 0;
+    }
+    .msg.matcha .bubble li { margin-bottom: 0.25em; }
+    .msg.matcha .bubble h1, .msg.matcha .bubble h2, .msg.matcha .bubble h3 {
+      color: var(--green);
+      font-weight: 600;
+      margin: 0.6em 0 0.3em;
+    }
+    .msg.matcha .bubble h1 { font-size: 1.1em; }
+    .msg.matcha .bubble h2 { font-size: 1em; }
+    .msg.matcha .bubble h3 { font-size: 0.95em; }
+    .msg.matcha .bubble a {
+      color: var(--green);
+      text-decoration: underline;
+      cursor: pointer;
+    }
+    .msg.matcha .bubble a:hover { opacity: 0.8; }
+    .msg.matcha .bubble blockquote {
+      border-left: 2px solid var(--green);
+      padding-left: 10px;
+      color: var(--text-mid);
+      margin: 6px 0;
+    }
+    .msg.matcha .bubble hr {
+      border: none;
+      border-top: 1px solid #222;
+      margin: 8px 0;
+    }
+
+    /* ── Open URL button in bubble ── */
+    .open-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 8px;
+      padding: 8px 14px;
+      background: var(--green-dim);
+      border: 1px solid var(--green);
+      border-radius: 20px;
+      color: var(--green);
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+    }
+    .open-btn:hover { background: var(--green); color: #000; }
+
+    /* ── Thinking indicator ── */
+    #thinking {
+      display: none;
+      align-self: flex-start;
+      padding: 10px 16px;
+      background: var(--bg3);
+      border-radius: 18px;
+      border-bottom-left-radius: 4px;
+      border: 1px solid #222;
+      gap: 5px;
+      align-items: center;
+    }
+    #thinking.show { display: flex; }
+
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green); opacity: 0.4;
+      animation: bounce 1.2s ease-in-out infinite;
+    }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+
+    /* ── Empty state ── */
+    #empty {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 8px; padding: 20px; text-align: center;
+      margin: auto;
+    }
+
+    #empty .em-icon {
+      font-size: 2rem; margin-bottom: 8px; opacity: 0.3;
+    }
+
+    #empty .em-title {
+      font-size: 1rem; color: var(--text-mid);
+      font-weight: 400; letter-spacing: 0.02em;
+    }
+
+    #empty .em-sub {
+      font-size: 0.75rem; color: var(--text-dim);
+      line-height: 1.6; max-width: 240px;
+    }
+
+    /* ── Suggestions ── */
+    #suggestions {
+      display: flex; gap: 8px;
+      padding: 0 16px 8px;
+      overflow-x: auto; flex-shrink: 0;
+      -webkit-overflow-scrolling: touch;
+    }
+    #suggestions::-webkit-scrollbar { display: none; }
+    #suggestions.hide { display: none; }
+
+    .chip {
+      flex-shrink: 0;
+      background: var(--bg3);
+      border: 1px solid #252525;
+      border-radius: 20px;
+      padding: 7px 14px;
+      font-size: 0.75rem;
+      color: var(--text-mid);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+    .chip:active { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+
+    /* ── Input Bar ── */
+    #input-bar {
+      flex-shrink: 0;
+      padding: 10px 16px;
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+      background: var(--bg);
+      border-top: 1px solid #1a1a1a;
+    }
+
+    #input-row {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--bg2);
+      border: 1px solid #222;
+      border-radius: 28px;
+      padding: 10px 14px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    #input-row:focus-within {
+      border-color: var(--green);
+      box-shadow: 0 0 0 3px var(--green-dim);
+    }
+
+    #input {
+      flex: 1; background: transparent; border: none; outline: none;
+      color: var(--text); font-family: var(--font);
+      font-size: 0.95rem; line-height: 1.4;
+    }
+
+    #input::placeholder { color: var(--text-dim); }
+
+    #voice-btn {
+      width: 30px; height: 30px; border-radius: 50%;
+      background: transparent; border: none;
+      color: var(--text-dim); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; transition: color 0.2s;
+    }
+    #voice-btn:active { color: var(--green); }
+    #voice-btn.listening { color: var(--green); animation: pulse 1s infinite; }
+
+    #send-btn {
+      width: 30px; height: 30px; border-radius: 50%;
+      background: var(--green); border: none;
+      color: #000; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; transition: opacity 0.2s; opacity: 0;
+    }
+    #send-btn.show { opacity: 1; }
+
+    /* ── Animations ── */
+    @keyframes glow {
+      0%,100% { box-shadow: 0 0 15px var(--green-dim); }
+      50% { box-shadow: 0 0 30px var(--green-glow); }
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulse {
+      0%,100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    @keyframes bounce {
+      0%,100% { transform: translateY(0); opacity: 0.4; }
+      50% { transform: translateY(-4px); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Boot Screen -->
+<div id="boot">
+  <div class="boot-ring">M</div>
+  <div class="boot-text" id="boot-msg">Starting...</div>
+</div>
+
+<!-- App -->
+<div id="app">
+
+  <!-- Header -->
+  <div id="header">
+    <div class="logo">MATCHA</div>
+    <div class="mode-badge">
+      <div class="mode-dot" id="mode-dot"></div>
+      <span id="mode-text">Local</span>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <div id="chat">
+    <div id="chat-inner">
+      <div id="empty">
+        <div class="em-icon">⚡</div>
+        <div class="em-title">What do you need?</div>
+        <div class="em-sub">Ask me anything — I handle the rest.</div>
+      </div>
+      <div id="thinking">
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Suggestions -->
+  <div id="suggestions">
+    <div class="chip" onclick="send('Who are you?')">Who are you?</div>
+    <div class="chip" onclick="send('What can you do?')">Capabilities</div>
+    <div class="chip" onclick="send('Weather in London')">Weather</div>
+    <div class="chip" onclick="send('Latest news')">News</div>
+    <div class="chip" onclick="send('Open YouTube')">Open YouTube</div>
+    <div class="chip" onclick="send('Show system info')">System info</div>
+    <div class="chip" onclick="send('Remind me in 30 minutes')">Reminder</div>
+    <div class="chip" onclick="send('Scan for viruses')">Security scan</div>
+  </div>
+
+  <!-- Input Bar -->
+  <div id="input-bar">
+    <div id="input-row">
+      <input id="input" type="text" placeholder="Ask MATCHA anything..."
+             autocomplete="off" autocorrect="off" spellcheck="false"
+             enterkeyhint="send"/>
+      <button id="voice-btn" title="Voice">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+      <button id="send-btn" title="Send">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const chatEl = document.getElementById('chat');
+  const chatInner = document.getElementById('chat-inner');
+  const inputEl = document.getElementById('input');
+  const sendBtn = document.getElementById('send-btn');
+  const voiceBtn = document.getElementById('voice-btn');
+  const thinkingEl = document.getElementById('thinking');
+  const emptyEl = document.getElementById('empty');
+  const suggestionsEl = document.getElementById('suggestions');
+  const modeDot = document.getElementById('mode-dot');
+  const modeText = document.getElementById('mode-text');
+  const bootEl = document.getElementById('boot');
+  const bootMsg = document.getElementById('boot-msg');
+
+  let isOnline = navigator.onLine;
+  let chatStarted = false;
+
+  // ── Boot ──
+  async function boot() {
+    try {
+      const r = await fetch('/api/boot');
+      const d = await r.json();
+      bootMsg.textContent = d.greeting || 'MATCHA ready.';
+    } catch {
+      bootMsg.textContent = 'MATCHA ready.';
+    }
+    updateMode();
+    setTimeout(() => {
+      bootEl.classList.add('fade');
+      setTimeout(() => bootEl.remove(), 800);
+    }, 1800);
+  }
+
+  // ── Mode ──
+  function updateMode() {
+    isOnline = navigator.onLine;
+    modeDot.className = 'mode-dot' + (isOnline ? ' online' : '');
+    modeText.textContent = isOnline ? 'Connected' : 'Local';
+  }
+  window.addEventListener('online', updateMode);
+  window.addEventListener('offline', updateMode);
+
+  // ── Input ──
+  inputEl.addEventListener('input', () => {
+    sendBtn.className = inputEl.value.trim() ? 'show' : '';
+  });
+
+  inputEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send(inputEl.value);
+    }
+  });
+
+  sendBtn.addEventListener('click', () => send(inputEl.value));
+
+  // ── Send ──
+  async function send(text) {
+    text = (text || '').trim();
+    if (!text) return;
+
+    if (!chatStarted) {
+      chatStarted = true;
+      emptyEl.remove();
+      suggestionsEl.classList.add('hide');
+    }
+
+    addMessage(text, 'user');
+    inputEl.value = '';
+    sendBtn.className = '';
+
+    // Show thinking
+    thinkingEl.classList.add('show');
+    chatInner.appendChild(thinkingEl);
+    scrollBottom();
+
+    try {
+      const r = await fetch('/api/think', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: text, online: isOnline })
+      });
+      const d = await r.json();
+      thinkingEl.classList.remove('show');
+
+      const response = d.response || 'Something went wrong.';
+
+      // Check for URL open command
+      if (response.startsWith('__OPEN_URL__')) {
+        const urlMatch = response.match(/__OPEN_URL__(.+?)__LABEL__(.+)/);
+        if (urlMatch) {
+          const url = urlMatch[1];
+          const label = urlMatch[2];
+          window.open(url, '_blank');
+          addMessage(`Opening ${label}...`, 'matcha', true);
+        }
+      } else {
+        addMessage(response, 'matcha');
+      }
+    } catch {
+      thinkingEl.classList.remove('show');
+      addMessage('Connection lost. Check your network.', 'matcha');
+    }
+  }
+
+  // ── Add message ──
+  function addMessage(text, role, simple = false) {
+    const msg = document.createElement('div');
+    msg.className = `msg ${role}`;
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+
+    if (role === 'matcha' && !simple) {
+      bubble.innerHTML = renderMarkdown(text);
+      // Make links open in new tab
+      bubble.querySelectorAll('a').forEach(a => {
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+      });
+    } else {
+      bubble.textContent = text;
+    }
+
+    msg.appendChild(bubble);
+    chatInner.insertBefore(msg, thinkingEl);
+    scrollBottom();
+  }
+
+  // ── Markdown renderer ──
+  function renderMarkdown(text) {
+    let html = text;
+
+    // Escape HTML first (except we'll add our own)
+    const escapeHtml = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+    // Code blocks (``` ... ```)
+    html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+      return `<pre><code class="lang-${lang || 'text'}">${escapeHtml(code.trim())}</code></pre>`;
+    });
+
+    // Inline code
+    html = html.replace(/`([^`\n]+)`/g, (_, code) => `<code>${escapeHtml(code)}</code>`);
+
+    // Headers
+    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+    // Bold
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+    // Italic
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+    // Blockquote
+    html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+
+    // Horizontal rule
+    html = html.replace(/^---+$/gm, '<hr>');
+
+    // Unordered lists
+    html = html.replace(/^[\*\-] (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
+
+    // Ordered lists
+    html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+
+    // Links [text](url)
+    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, '<a href="$2">$1</a>');
+
+    // Auto-link URLs
+    html = html.replace(/(^|[^"'])(https?:\/\/[^\s<]+)/g, '$1<a href="$2">$2</a>');
+
+    // Paragraphs — double newlines
+    html = html.replace(/\n\n+/g, '</p><p>');
+    html = '<p>' + html + '</p>';
+
+    // Single newlines → <br> inside paragraphs
+    html = html.replace(/([^>])\n([^<])/g, '$1<br>$2');
+
+    // Clean up empty paragraphs
+    html = html.replace(/<p>\s*<\/p>/g, '');
+    html = html.replace(/<p>(<(?:h[123]|ul|ol|pre|blockquote|hr))/g, '$1');
+    html = html.replace(/(<\/(?:h[123]|ul|ol|pre|blockquote)>)<\/p>/g, '$1');
+
+    return html;
+  }
+
+  function scrollBottom() {
+    requestAnimationFrame(() => {
+      chatEl.scrollTop = chatEl.scrollHeight;
+    });
+  }
+
+  // ── Voice — browser Web Speech API ──
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  voiceBtn.addEventListener('click', () => {
+    if (!SpeechRecognition) {
+      addMessage("Voice input isn't supported in this browser. Try Chrome or Edge.", 'matcha');
+      return;
+    }
+
+    const recog = new SpeechRecognition();
+    recog.lang = 'en-GB';
+    recog.interimResults = false;
+    recog.maxAlternatives = 1;
+
+    recog.onstart = () => {
+      voiceBtn.classList.add('listening');
+      inputEl.placeholder = 'Listening...';
+    };
+
+    recog.onresult = (e) => {
+      const text = e.results[0][0].transcript;
+      inputEl.value = text;
+      sendBtn.className = 'show';
+      send(text);
+    };
+
+    recog.onerror = (e) => {
+      if (e.error === 'not-allowed') {
+        addMessage("Microphone access denied. Allow mic permissions and try again.", 'matcha');
+      } else if (e.error === 'no-speech') {
+        addMessage("Didn't catch that. Try again.", 'matcha');
+      }
+    };
+
+    recog.onend = () => {
+      voiceBtn.classList.remove('listening');
+      inputEl.placeholder = 'Ask MATCHA anything...';
+    };
+
+    recog.start();
+  });
+
+  // ── Start ──
+  boot();
+</script>
+</body>
+</html>

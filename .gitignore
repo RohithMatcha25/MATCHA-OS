@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Database / memory files (user data — not for repo)
+core/memory/
+*.db
+*.sqlite
+
+# Dist / build
+dist/
+build/
+*.egg-info/
+
+# Logs
+*.log
+nohup.out
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Secrets (never commit API keys)
+.env
+secrets.py
+
+# Cloudflare tunnel
+cloudflared
