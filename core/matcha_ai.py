@@ -684,15 +684,17 @@ class MatchaAI:
                 if key in t_lower:
                     service = name
                     break
-            # Ask permission first
-            if self._perms:
-                perm = self._perms.needs_permission(
-                    "open_browser", service,
-                    {"url": f"https://{service.lower()}.com", "label": service}
-                )
-                if perm.get("ask"):
-                    return perm["message"]
-            return self._browser_agent.login_and_act(service, text, self._brain)
+
+            # If credentials are saved — just do it, no permission prompt needed
+            creds = self._browser_agent.get_credentials(service)
+            if creds:
+                return self._browser_agent.login_and_act(service, text, self._brain)
+
+            # No credentials — ask for them first
+            return (
+                f"I need your {service} credentials to do this. They'll be saved only on your machine.\n\n"
+                f"Say: **my {service.lower()} username is your@email.com and password is yourpassword**"
+            )
 
         # ── Save Credentials ──────────────────────────────────────────────────────
         elif intent == "save_credentials":
