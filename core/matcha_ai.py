@@ -431,6 +431,40 @@ class MatchaAI:
         """Detect the intent of user input."""
         t = text.lower().strip()
 
+        # ══ HARD INTERCEPTS — never reach Groq ═══════════════════════════════
+
+        # Credential saving — catches typos: passwrod, passw, passwd
+        _cred_kws = ["username is", "user name is", "password is", "passwrod is",
+                     "passw is", "passwd is", "my email is", "login is",
+                     "save my credentials", "store my login"]
+        _has_email = any(c in t for c in ["@", ".com", ".co.uk"])
+        if any(w in t for w in _cred_kws) or (_has_email and any(
+                w in t for w in ["username", "password", "passwrod", "login", "email"])):
+            return "save_credentials"
+
+        # Browser tasks — service + action keyword
+        _svcs = ["linkedin", "instagram", "insta", "github", "git repo", "my repo",
+                 "gmail", "google mail", "amazon", "twitter", "facebook",
+                 "deliveroo", "uber eats", "ubereats", "just eat",
+                 "netflix", "spotify", "my profile", "my account"]
+        _acts = ["login", "log in", "log into", "sign in", "open my", "access my",
+                 "go to my", "check my", "update my", "apply", "order",
+                 "post on", "message on", "search on", "find jobs",
+                 "apply jobs", "apply to jobs", "start applying"]
+        if any(s in t for s in _svcs) and any(a in t for a in _acts):
+            return "browser_task"
+
+        # Task / status questions
+        if t.startswith("did you") or t.startswith("have you") or t.startswith("are you applying"):
+            return "task_status"
+
+        # Credential check
+        if any(w in t for w in ["do you have my", "did you save my", "my credentials",
+                                 "have you got my", "saved my creds"]):
+            return "credential_check"
+
+        # ══ End hard intercepts ═══════════════════════════════════════════════
+
         # ── System control (must come before 'open') ──
         if any(w in t for w in ["volume up", "volume down", "increase volume", "decrease volume",
                                   "turn up", "turn down", "louder", "quieter"]):
@@ -695,12 +729,17 @@ class MatchaAI:
 
             # ── Detect service key ────────────────────────────────────────────
             SERVICE_MAP = {
-                "linkedin": "linkedin", "instagram": "instagram", "insta": "instagram",
-                "github": "github", "gmail": "gmail", "google mail": "gmail",
-                "amazon": "amazon", "twitter": "twitter", "x.com": "twitter",
+                "linkedin": "linkedin",
+                "instagram": "instagram", "insta": "instagram",
+                "github": "github", "git repo": "github", "my repo": "github", "git": "github",
+                "gmail": "gmail", "google mail": "gmail",
+                "amazon": "amazon",
+                "twitter": "twitter", "x.com": "twitter",
                 "facebook": "facebook", "fb": "facebook",
-                "netflix": "netflix", "spotify": "spotify",
-                "deliveroo": "deliveroo", "uber eats": "ubereats", "ubereats": "ubereats",
+                "netflix": "netflix",
+                "spotify": "spotify",
+                "deliveroo": "deliveroo",
+                "uber eats": "ubereats", "ubereats": "ubereats",
                 "just eat": "just eat",
             }
             service_key = "web"
@@ -709,11 +748,12 @@ class MatchaAI:
                     service_key = key
                     break
 
-            # ── Get credentials ───────────────────────────────────────────────
-            # Try both exact key and title case
-            creds = self._browser_agent.get_credentials(service_key)
-            if not creds:
-                creds = self._browser_agent.get_credentials(service_key.title())
+            # ── Get credentials — try multiple key variants ───────────────────
+            creds = None
+            for attempt in [service_key, service_key.title(), service_key.upper()]:
+                creds = self._browser_agent.get_credentials(attempt)
+                if creds:
+                    break
 
             if not creds:
                 return (
@@ -808,41 +848,57 @@ class MatchaAI:
             t_orig = text
             t_lower = text.lower()
 
-            # Detect service from context
+            # ── Detect service ────────────────────────────────────────────────
             service = "web"
-            for svc in ["linkedin", "instagram", "github", "gmail", "amazon", "twitter",
-                        "facebook", "netflix", "spotify", "deliveroo"]:
-                if svc in t_lower:
-                    service = svc.title()
+            svc_map = {
+                "linkedin": "linkedin", "instagram": "instagram", "insta": "instagram",
+                "github": "github", "git": "github", "gmail": "gmail",
+                "amazon": "amazon", "twitter": "twitter", "facebook": "facebook",
+                "netflix": "netflix", "spotify": "spotify", "deliveroo": "deliveroo",
+            }
+            for kw, svc in svc_map.items():
+                if kw in t_lower:
+                    service = svc
                     break
 
-            # Extract username/email — handles "username is X", "email is X", "my username is X"
-            user_match = _re.search(
-                r'(?:my\s+)?(?:\w+\s+)?(?:username|email|login)\s+is\s+([^\s]+)',
-                t_lower
-            )
-            # Extract password — case-sensitive match to preserve special chars
-            pwd_match = _re.search(
-                r'(?:password|pass(?:word)?)\s+is\s+([^\s]+)',
-                t_orig, re.IGNORECASE
+            # ── Extract email/username ─────────────────────────────────────────
+            # Priority 1: explicit "username is X" or "email is X"
+            # Priority 2: bare email address anywhere in text
+            user_match = (
+                _re.search(r'(?:user\s*name|email|login)\s+is\s+([a-zA-Z0-9_.+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})', t_orig, _re.IGNORECASE) or
+                _re.search(r'(?:user\s*name|email|login)\s+is\s+(\S+)', t_orig, _re.IGNORECASE) or
+                _re.search(r'\b([a-zA-Z0-9_.+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\b', t_orig)
             )
 
-            if user_match and pwd_match and self._browser_agent:
-                username = user_match.group(1).strip()
-                password = pwd_match.group(1).strip()
-                result = self._browser_agent.store_credentials(service, username, password)
-                # Also store in persistent memory (no plain password stored in memory)
+            # ── Extract password — handles typos: passwrod, passw, passwd ─────
+            pwd_match = _re.search(
+                r'pass\w*\s*[:\-]?\s*([^\s,]+)',
+                t_orig, _re.IGNORECASE
+            )
+
+            if user_match and pwd_match:
+                username = user_match.group(1).strip().rstrip(".,")
+                password = pwd_match.group(1).strip().rstrip(".,")
+
+                if self._browser_agent:
+                    self._browser_agent.store_credentials(service, username, password)
                 if self._persistent_memory:
                     self._persistent_memory.remember("credentials", service, f"saved ({username})")
+
                 return (
-                    f"Credentials for **{service}** saved securely on your machine.\n\n"
-                    f"Username: {username}\n"
-                    f"To use: say 'login to my {service.lower()}'"
+                    f"✅ **{service.title()} credentials saved** on your machine.\n\n"
+                    f"Username: `{username}`\n\n"
+                    f"Say: **login to my {service}** to use them."
                 )
 
+            # If only email found, ask for password
+            if user_match:
+                username = user_match.group(1).strip()
+                return f"Got username `{username}`. What's the password for {service.title()}?"
+
             return (
-                f"I detected {service} credentials but couldn't parse them.\n\n"
-                f"Say: **my {service.lower()} username is email@x.com and password is mypassword**"
+                f"Couldn't extract credentials. Say exactly:\n\n"
+                f"**my {service} username is email@x.com and password is yourpassword**"
             )
 
         # ── Memory Store ──────────────────────────────────────────────────────────
