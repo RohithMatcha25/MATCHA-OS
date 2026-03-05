@@ -717,62 +717,82 @@ class MatchaAI:
                     f"Say: **my {service.lower()} username is your@email.com and password is yourpassword**"
                 )
 
-            # LinkedIn-specific tasks
+            # ── LinkedIn ─────────────────────────────────────────────────────
             if service == "LinkedIn":
                 try:
                     from core.browser.linkedin_agent import LinkedInAgent
                     if not hasattr(self, '_linkedin_agent'):
                         self._linkedin_agent = LinkedInAgent()
-                    agent = self._linkedin_agent
+                    li = self._linkedin_agent
                     u, p = creds["username"], creds["password"]
 
-                    if any(w in t_lower for w in ["apply", "find jobs", "search jobs", "job search", "get jobs"]):
-                        # Extract job query
-                        query = "software engineer"
-                        if self._brain:
-                            try:
-                                q = self._brain.think(f"Extract only the job title from: '{text}'. Return just the job title, nothing else.")
-                                if q and len(q.strip()) < 60:
-                                    query = q.strip().strip('"').strip("'")
-                            except Exception:
-                                pass
-                        # Run in background
+                    # Extract locations from text
+                    locations = []
+                    for loc in ["uk", "united kingdom", "england", "scotland", "india", "london", "manchester", "birmingham"]:
+                        if loc in t_lower:
+                            locations.append(loc.title())
+                    if not locations:
+                        locations = ["United Kingdom"]
+
+                    # Extract job titles
+                    job_titles = []
+                    for jt in ["software engineer", "automation engineer", "backend engineer",
+                                "frontend engineer", "full stack", "python developer",
+                                "software developer", "devops"]:
+                        if jt in t_lower:
+                            job_titles.append(jt)
+                    if not job_titles:
+                        job_titles = ["software engineer"]
+
+                    # ── Apply ─────────────────────────────────────────────────
+                    if any(w in t_lower for w in ["apply to all", "apply for jobs", "auto apply",
+                                                   "apply jobs", "apply to jobs", "start applying"]):
+                        def _apply():
+                            for jt in job_titles:
+                                li.apply_jobs_task(u, p, query=jt, locations=locations)
+                        threading.Thread(target=_apply, daemon=True).start()
+                        return (
+                            f"Starting Easy Apply on LinkedIn for: **{', '.join(job_titles)}**\n"
+                            f"Locations: {', '.join(locations)}\n\n"
+                            f"Browser opening now. This takes 3-5 minutes. Say **'did you apply?'** when done."
+                        )
+
+                    # ── Search jobs ───────────────────────────────────────────
+                    elif any(w in t_lower for w in ["search", "find jobs", "job search",
+                                                     "search for", "look for jobs", "get jobs"]):
+                        def _search():
+                            for jt in job_titles:
+                                li.search_jobs_task(u, p, query=jt, locations=locations)
+                        threading.Thread(target=_search, daemon=True).start()
+                        return (
+                            f"Searching LinkedIn for **{', '.join(job_titles)}** in {', '.join(locations)}.\n"
+                            f"Browser opening. Say **'what jobs did you find?'** in ~20 seconds."
+                        )
+
+                    # ── Profile ───────────────────────────────────────────────
+                    elif any(w in t_lower for w in ["profile", "update profile", "view profile",
+                                                     "my profile", "open profile"]):
                         threading.Thread(
-                            target=lambda: setattr(self, '_last_job_result', agent.search_jobs(u, p, query)),
-                            daemon=True
+                            target=lambda: li.view_profile_task(u, p), daemon=True
                         ).start()
-                        return f"Searching LinkedIn for **{query}** jobs in the UK. Opening browser now — results in ~15 seconds. Ask 'what jobs did you find?' when done."
+                        return "Opening your LinkedIn profile. Browser launching now — takes 10-15 seconds."
 
-                    elif any(w in t_lower for w in ["apply to all", "apply for jobs", "auto apply", "apply jobs"]):
-                        query = "software engineer"
-                        threading.Thread(
-                            target=lambda: setattr(self, '_last_job_result', agent.apply_jobs(u, p, query)),
-                            daemon=True
-                        ).start()
-                        return f"Starting job application process for **{query}** on LinkedIn. This opens a real browser and applies to Easy Apply jobs. Check back in ~2 minutes."
+                    # ── Show applications ─────────────────────────────────────
+                    elif any(w in t_lower for w in ["show applications", "my applications",
+                                                     "show my jobs", "applied jobs"]):
+                        return li.get_applied_jobs()
 
-                    elif any(w in t_lower for w in ["profile", "view profile", "my profile", "update profile"]):
-                        threading.Thread(
-                            target=lambda: setattr(self, '_last_job_result', agent.view_profile(u, p)),
-                            daemon=True
-                        ).start()
-                        return "Opening your LinkedIn profile now. Browser launching..."
-
-                    elif any(w in t_lower for w in ["applied jobs", "applications", "what jobs"]):
-                        return agent.get_applied_jobs()
-
+                    # ── Default: profile ──────────────────────────────────────
                     else:
-                        # Generic login
                         threading.Thread(
-                            target=lambda: setattr(self, '_last_job_result', agent.view_profile(u, p)),
-                            daemon=True
+                            target=lambda: li.view_profile_task(u, p), daemon=True
                         ).start()
-                        return "Logging into LinkedIn now. Browser opening..."
+                        return "Logging into LinkedIn and opening your profile. Browser launching now."
 
                 except Exception as e:
-                    return f"LinkedIn agent error: {e}"
+                    return f"LinkedIn error: {e}"
 
-            # Other services — generic browser task
+            # ── Other services ────────────────────────────────────────────────
             return self._browser_agent.login_and_act(service, text, self._brain)
 
         # ── Save Credentials ──────────────────────────────────────────────────────
@@ -843,19 +863,18 @@ class MatchaAI:
         # ── Task Status ───────────────────────────────────────────────────────────
         elif intent == "task_status":
             t_lower = text.lower()
-            # Check LinkedIn job results
-            if any(w in t_lower for w in ["jobs", "applications", "apply", "linkedin"]):
-                if hasattr(self, '_last_job_result') and self._last_job_result:
-                    return self._last_job_result
-                if hasattr(self, '_linkedin_agent'):
-                    return self._linkedin_agent.get_status()
-                return "No LinkedIn tasks run yet."
+            # Check LinkedIn status first
+            if hasattr(self, '_linkedin_agent'):
+                li = self._linkedin_agent
+                result = li.get_status()
+                if result and result != "Status: idle":
+                    return result
+            # Generic browser task status
             if self._browser_agent:
-                status = self._browser_agent.get_task_status()
                 saved = self._browser_agent.list_saved_services()
-                cred_info = f"\n\nSaved credentials for: {', '.join(saved)}" if saved else ""
-                return status + cred_info
-            return "No background tasks running."
+                cred_info = f"Saved credentials for: {', '.join(saved)}" if saved else "No credentials saved."
+                return cred_info
+            return "No tasks running."
 
         elif intent == "credential_check":
             if not self._browser_agent:
