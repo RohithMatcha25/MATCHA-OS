@@ -694,6 +694,7 @@ class MatchaAI:
             if not self._browser_agent:
                 return "Browser agent unavailable."
             t_lower = text.lower()
+
             # Detect service
             services = {
                 "linkedin": "LinkedIn", "instagram": "Instagram", "insta": "Instagram",
@@ -708,16 +709,71 @@ class MatchaAI:
                     service = name
                     break
 
-            # If credentials are saved — just do it, no permission prompt needed
+            # Check credentials
             creds = self._browser_agent.get_credentials(service)
-            if creds:
-                return self._browser_agent.login_and_act(service, text, self._brain)
+            if not creds:
+                return (
+                    f"I need your {service} credentials first. They'll be saved only on your machine.\n\n"
+                    f"Say: **my {service.lower()} username is your@email.com and password is yourpassword**"
+                )
 
-            # No credentials — ask for them first
-            return (
-                f"I need your {service} credentials to do this. They'll be saved only on your machine.\n\n"
-                f"Say: **my {service.lower()} username is your@email.com and password is yourpassword**"
-            )
+            # LinkedIn-specific tasks
+            if service == "LinkedIn":
+                try:
+                    from core.browser.linkedin_agent import LinkedInAgent
+                    if not hasattr(self, '_linkedin_agent'):
+                        self._linkedin_agent = LinkedInAgent()
+                    agent = self._linkedin_agent
+                    u, p = creds["username"], creds["password"]
+
+                    if any(w in t_lower for w in ["apply", "find jobs", "search jobs", "job search", "get jobs"]):
+                        # Extract job query
+                        query = "software engineer"
+                        if self._brain:
+                            try:
+                                q = self._brain.think(f"Extract only the job title from: '{text}'. Return just the job title, nothing else.")
+                                if q and len(q.strip()) < 60:
+                                    query = q.strip().strip('"').strip("'")
+                            except Exception:
+                                pass
+                        # Run in background
+                        threading.Thread(
+                            target=lambda: setattr(self, '_last_job_result', agent.search_jobs(u, p, query)),
+                            daemon=True
+                        ).start()
+                        return f"Searching LinkedIn for **{query}** jobs in the UK. Opening browser now — results in ~15 seconds. Ask 'what jobs did you find?' when done."
+
+                    elif any(w in t_lower for w in ["apply to all", "apply for jobs", "auto apply", "apply jobs"]):
+                        query = "software engineer"
+                        threading.Thread(
+                            target=lambda: setattr(self, '_last_job_result', agent.apply_jobs(u, p, query)),
+                            daemon=True
+                        ).start()
+                        return f"Starting job application process for **{query}** on LinkedIn. This opens a real browser and applies to Easy Apply jobs. Check back in ~2 minutes."
+
+                    elif any(w in t_lower for w in ["profile", "view profile", "my profile", "update profile"]):
+                        threading.Thread(
+                            target=lambda: setattr(self, '_last_job_result', agent.view_profile(u, p)),
+                            daemon=True
+                        ).start()
+                        return "Opening your LinkedIn profile now. Browser launching..."
+
+                    elif any(w in t_lower for w in ["applied jobs", "applications", "what jobs"]):
+                        return agent.get_applied_jobs()
+
+                    else:
+                        # Generic login
+                        threading.Thread(
+                            target=lambda: setattr(self, '_last_job_result', agent.view_profile(u, p)),
+                            daemon=True
+                        ).start()
+                        return "Logging into LinkedIn now. Browser opening..."
+
+                except Exception as e:
+                    return f"LinkedIn agent error: {e}"
+
+            # Other services — generic browser task
+            return self._browser_agent.login_and_act(service, text, self._brain)
 
         # ── Save Credentials ──────────────────────────────────────────────────────
         elif intent == "save_credentials":
@@ -786,6 +842,14 @@ class MatchaAI:
 
         # ── Task Status ───────────────────────────────────────────────────────────
         elif intent == "task_status":
+            t_lower = text.lower()
+            # Check LinkedIn job results
+            if any(w in t_lower for w in ["jobs", "applications", "apply", "linkedin"]):
+                if hasattr(self, '_last_job_result') and self._last_job_result:
+                    return self._last_job_result
+                if hasattr(self, '_linkedin_agent'):
+                    return self._linkedin_agent.get_status()
+                return "No LinkedIn tasks run yet."
             if self._browser_agent:
                 status = self._browser_agent.get_task_status()
                 saved = self._browser_agent.list_saved_services()
