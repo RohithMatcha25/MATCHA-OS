@@ -776,7 +776,17 @@ class MatchaAI:
                                         "apply jobs", "apply to jobs", "start applying",
                                         "apply related", "filter and apply"]
             ):
-                # Extract job titles
+                # Load from user profile if available
+                import json as _json, os as _os
+                _profile_path = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "core", "memory", "user_profile.json")
+                _profile = {}
+                try:
+                    if _os.path.exists(_profile_path):
+                        _profile = _json.load(open(_profile_path))
+                except Exception:
+                    pass
+
+                # Extract job titles from text, fall back to profile
                 job_titles = []
                 for jt in ["software engineer", "automation engineer", "backend",
                             "frontend", "full stack", "python developer", "devops",
@@ -784,9 +794,9 @@ class MatchaAI:
                     if jt in t_lower:
                         job_titles.append(jt)
                 if not job_titles:
-                    job_titles = ["software engineer"]
+                    job_titles = _profile.get("target_roles", ["Software Engineer"])[:3]
 
-                # Extract locations
+                # Extract locations from text, fall back to profile
                 locations = []
                 loc_map = {"uk": "United Kingdom", "united kingdom": "United Kingdom",
                            "scotland": "Scotland", "india": "India",
@@ -795,7 +805,7 @@ class MatchaAI:
                     if loc_kw in t_lower:
                         locations.append(loc_name)
                 if not locations:
-                    locations = ["United Kingdom"]
+                    locations = _profile.get("target_locations", ["United Kingdom"])
 
                 def _apply_all():
                     for jt in job_titles:
